@@ -279,4 +279,4 @@ PAKE 会话 → 生成 6 位验证码 → PINDialog 弹窗 → 输入 → 验证
 
 ## License
 
-MIT。完整逆向诊断报告见 `analysis/2026-08-14-icloud-password-diagnosis/README.md`。
+MIT。
