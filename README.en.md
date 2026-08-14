@@ -1,5 +1,7 @@
 # iCloud Passwords Verification Popup Fix
 
+> [简体中文](README.md) | English
+
 Fixes the "verification code popup never appears" issue with the iCloud Passwords browser extension on Windows.
 No Apple files are modified — the script only adds registry entries, with one-click **Fix / Undo / Status** modes.
 
@@ -7,6 +9,7 @@ No Apple files are modified — the script only adds registry entries, with one-
 
 - [Symptoms](#symptoms)
 - [Quick Start](#quick-start)
+- [Usage Guide](#usage-guide)
 - [Root Cause](#root-cause)
 - [How the Fix Works](#how-the-fix-works)
 - [Registry Changes](#registry-changes)
@@ -39,7 +42,40 @@ pwsh -File patch_icloud_secd_com.ps1 -Undo  # undo directly
 
 Right-click → "Run with PowerShell" also works (the script is compatible with both PS 5.1 and PS 7, and elevates itself).
 
-After fixing: **fully close Edge and reopen it**, then click the extension icon to verify.
+## Usage Guide
+
+### Running the script
+
+Any of these three ways works. A normal (non-admin) PowerShell window is fine — the script auto-elevates via UAC when needed.
+
+| Mode | Command |
+|---|---|
+| Interactive menu (recommended) | `pwsh -File patch_icloud_secd_com.ps1` |
+| Fix directly | `pwsh -File patch_icloud_secd_com.ps1 -Fix` |
+| Undo directly | `pwsh -File patch_icloud_secd_com.ps1 -Undo` |
+
+### Interactive menu
+
+![Interactive menu](images/01-menu.png)
+
+After running, the script detects the current state and shows a menu:
+
+- **Current status** — auto-detected fix state:
+  - `✅ Fixed` — Class registration + State=1 all present
+  - `⚠️ Partially fixed` — some items present (commonly missing only State or Class)
+  - `❌ Not fixed` — everything missing (typical state after reinstall)
+- **[1] Fix** — UAC prompt → writes all registry entries → output echoed back
+- **[2] Undo** — UAC prompt → deletes all entries written by the fix (State is kept)
+- **[3] Show details** — read-only: package / Class / Server / TypeLib / Interface / State
+- **[0] Exit**
+
+### Fix output
+
+Success looks like: every step `[OK]` + `✅ Fix complete`.
+
+### Verifying the result
+
+After fixing: **fully close Edge and reopen it**, then click the extension icon: the 6-digit verification popup appears → enter the code in the extension's input box → auto-fill succeeds.
 
 ---
 
