@@ -1,0 +1,9 @@
+# 运行时日志（中间产物）
+scripts/logs/
+
+# 分析归档：含隐私证据（Apple ID 手机号）、exe 副本、IDA 数据库
+analysis/
+
+# Python 缓存
+__pycache__/
+*.pyc
