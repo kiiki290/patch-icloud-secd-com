@@ -43,7 +43,10 @@ function Invoke-Elevated([string]$Mode) {
     $cmdLine = "$shellExe -NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -$Mode > `"$outFile`" 2>&1"
     try {
         $p = Start-Process cmd -Verb RunAs -Wait -PassThru -ArgumentList '/c', "`"$cmdLine`""
-        if (Test-Path $outFile) { Get-Content $outFile -Encoding UTF8 }
+        if (Test-Path $outFile) {
+            # 日志走信息流（Write-Host），这样 $null = 吞退出码时不会连日志一起吞掉
+            Write-Host (Get-Content $outFile -Raw -Encoding UTF8)
+        }
         Remove-Item $outFile -Force -ErrorAction SilentlyContinue
         return $p.ExitCode
     } catch {
