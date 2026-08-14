@@ -1,11 +1,13 @@
-# Claude Code 项目指引（含本机路径等内部信息，不入库）
+# Claude Code 项目指引（本机专用，不入库）
 CLAUDE.md
 
-# 运行时日志（中间产物）
+# 本机分析归档与运行时日志
+analysis/
 scripts/logs/
 
-# 分析归档：含隐私证据（Apple ID 手机号）、exe 副本、IDA 数据库
-analysis/
+# 仅公开修复脚本，其余诊断脚本保持本机私有
+scripts/debug/*
+!scripts/debug/patch_icloud_secd_com.ps1
 
 # Python 缓存
 __pycache__/

@@ -6,8 +6,7 @@
 #   在隔离视图的注册丢失且不再重建 → helper 的 CoCreateInstance 0x80040154
 #   → 扩展永远显示"在 Windows 版 iCloud 中启用密码"。
 # 修复：在真实注册表 PackagedCom 中模拟"打包 COM 声明" + HKCU/HKLM marshal 注册
-#   + CKKS Passwords State=1。详见
-#   analysis/2026-08-14-icloud-password-diagnosis/README.md 深夜追加章节。
+#   + CKKS Passwords State=1，让 SCM 以打包身份激活 secd，弹窗恢复。
 # ============================================================
 #requires -RunAsAdministrator
 
