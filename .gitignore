@@ -5,9 +5,8 @@ CLAUDE.md
 analysis/
 scripts/logs/
 
-# 仅公开修复脚本，其余诊断脚本保持本机私有
-scripts/debug/*
-!scripts/debug/patch_icloud_secd_com.ps1
+# 诊断脚本保持本机私有（修复脚本在根目录，见 patch_icloud_secd_com.ps1）
+scripts/debug/
 
 # Python 缓存
 __pycache__/
