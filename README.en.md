@@ -29,45 +29,49 @@ After clicking the iCloud Passwords extension icon in Edge/Chrome:
 2. But the **verification popup** (the small window with a 6-digit code, a `#32770` dialog) **never appears**
 3. After ~20–30 s the extension reports: *"Turn on Passwords in iCloud for Windows to use iCloud Passwords with Edge"*
 
-This typically happens **after reinstalling or upgrading iCloud for Windows**. Machines that were never reinstalled (or still have the historical registration) are unaffected.
+**Trigger condition** (confirmed by VM A/B experiments, 2026-08-15): installing/reinstalling iCloud **while the WindowsApps folder has elevated permissions** (a normal user granted Full Control) breaks it — no uninstall/reinstall needed, a first install with elevated permissions triggers it too; machines installed with standard permissions are unaffected.
 
 ## Quick Start
 
 ```powershell
-# Run in a normal PowerShell window (auto-elevates via UAC when not admin)
+# Regular users: double-click run_patch.bat (it requests admin rights via UAC)
+# Power users: open "Terminal (Admin)" / "Windows PowerShell (Admin)", then:
 pwsh -File patch_icloud_secd_com.ps1        # interactive menu (recommended)
 pwsh -File patch_icloud_secd_com.ps1 -Fix   # fix directly
 pwsh -File patch_icloud_secd_com.ps1 -Undo  # undo directly
 ```
 
-Right-click → "Run with PowerShell" also works (the script is compatible with both PS 5.1 and PS 7, and elevates itself).
+Right-click → "Run with PowerShell" also works (the script is compatible with both PS 5.1 and PS 7). **The script does not self-elevate**: when run without admin rights it only prints a hint — use run_patch.bat or an elevated PowerShell instead.
 
 ## Usage Guide
 
 ### Running the script
 
-Any of these three ways works. A normal (non-admin) PowerShell window is fine — the script auto-elevates via UAC when needed.
-
 | Mode | Command |
 |---|---|
-| Interactive menu (recommended) | `pwsh -File patch_icloud_secd_com.ps1` |
-| Fix directly | `pwsh -File patch_icloud_secd_com.ps1 -Fix` |
-| Undo directly | `pwsh -File patch_icloud_secd_com.ps1 -Undo` |
+| Double-click launcher (recommended, auto-elevates + bypasses policy) | `run_patch.bat` |
+| Interactive menu (admin required) | `pwsh -File patch_icloud_secd_com.ps1` |
+| Fix directly (admin required) | `pwsh -File patch_icloud_secd_com.ps1 -Fix` |
+| Undo directly (admin required) | `pwsh -File patch_icloud_secd_com.ps1 -Undo` |
 
 ### Interactive menu
 
 ![Interactive menu](images/01-menu.png)
 
-After running, the script detects the current state and shows a menu:
+After running, the script detects the current state and shows a menu (dual-mode):
 
 - **Current status** — auto-detected fix state:
   - `✅ Fixed` — Class registration + State=1 all present
   - `⚠️ Partially fixed` — some items present (commonly missing only State or Class)
   - `❌ Not fixed` — everything missing (typical state after reinstall)
-- **[1] Fix** — UAC prompt → writes all registry entries → output echoed back
-- **[2] Undo** — UAC prompt → deletes all entries written by the fix (State is kept)
-- **[3] Show details** — read-only: package / Class / Server / TypeLib / Interface / State
+  - Also shows WindowsApps permission anomalies and the MSVCP140 (VC++ runtime) version
+- **[1] First-aid fix** — writes PackagedCom packaged-COM declarations (no reinstall; popup works immediately)
+- **[2] Permanent fix** — restores WindowsApps ACL + guides reinstall (one-shot, no patch needed)
+- **[3] Undo** — deletes the first-aid entries (State kept)
+- **[4] Show details** — read-only: package / Class / Server / TypeLib / Interface / State / permissions / CRT
 - **[0] Exit**
+
+When already admin, [1]/[2]/[3] run directly; otherwise the script only prints an elevation hint (use run_patch.bat or an admin window).
 
 ### Fix output
 
@@ -109,18 +113,15 @@ The registry of an MSIX packaged app (and its COM servers) is **virtualized**: p
 
 secd's registration is written by an iCloud runtime flow (secd embeds an ATL `.rgs` script: `CLSID\{CE6AF8E5}='SecDaemon Class'` + `LocalServer32='%MODULE%'` + `TypeLib={71529314-...}`) and runs **only on first install**.
 
-### 3. The Apple bug: the registration is lost after reinstall and never recreated
+### 3. The real root cause: elevated WindowsApps at install time → the packaged-registration mount silently fails (corrected 2026-08-15)
 
-**After uninstalling/reinstalling iCloud, the isolated-view registration is wiped, and iCloud's runtime registrar never re-runs successfully** (verified: restarting all iCloud processes, toggling the Passwords switch, and signing out/in do not recreate it). From then on:
+**Uninstall/reinstall itself does not break anything** (VM A/B: reinstall with standard permissions → popup works); **installing while WindowsApps permissions are elevated** breaks it immediately (a first install triggers it too — no reinstall needed).
 
-```
-helper's CoCreateInstance → RPCSS can't find the CLSID in any view → 0x80040154 (CLASSNOTREG)
-→ helper throws _com_error → replies {"cmd":10} → extension shows the "enable Passwords" error → popup never appears
-```
+Mechanism: with elevated permissions, secd's runtime self-registration lands in the package's `Registry.dat` (App-V style registry-file virtualization; evidence: the broken state's Registry.dat contains the full SecDaemon Class + ISecDaemon marshal + TypeLib registration), but **RPCSS cannot resolve that registration from COMROOT** → helper CoCreateInstance 0x80040154 (CLASSNOTREG) → replies {"cmd":10} → popup never appears.
 
-**Comparison evidence**: on a healthy machine that was never reinstalled, RPCSS opens the CLSID from the isolated view (confirmed via ETW, `Status=0x0`); on the broken machine every path returned `0xC0000034`. The healthy machine's real registry (HKCR, PackagedCom, HKCU Classes) also lacks this registration — it exists only in the isolated view.
+**Comparison evidence**: on a machine installed with standard permissions, RPCSS opens the CLSID from the isolated view (confirmed via ETW); on the broken machine every path fails to resolve. The healthy machine's real registry (HKCR, PackagedCom, HKCU Classes) also lacks this registration — it exists only in the isolated view.
 
-> Note: an earlier hypothesis blamed the `p222-contactsws.icloud.com` DNS decommission (account-init slowness for China-region accounts) — disproven: the healthy machine has the same NXDOMAIN yet works fine. p222 only explains slow app startup, not the missing popup.
+> Note: earlier hypotheses — the `p222-contactsws.icloud.com` DNS decommission (account-init slowness for China-region accounts) and "registration lost after reinstall" — were disproven/corrected: p222 only explains slow app startup, not the missing popup; "lost registration" is actually a failed mount (see the archive README for the full history).
 
 ---
 
@@ -157,9 +158,13 @@ PackageFullName: AppleInc.iCloud_15.9.60.0_x64__nzyj5cx40ttqa   ← packaged ide
 
 The helper and secd communicate cross-process via COM. Marshaling ISecDaemon relies on the TypeLib (Universal Marshaler): `LoadTypeLib` reads the TLB location from `TypeLib\{71529314}\1.0\0\win32`, and `Interface\{E095A809}` provides the TypeLib reference and proxy information. Instrumentation showed helper/secd **querying these keys repeatedly** on startup; missing them breaks the call. The script writes them to **both HKCU and HKLM** so both the packaged user view and the system view resolve.
 
+### Prerequisite: VC++ runtime (MSVCP140 ≥ 14.4x)
+
+VM cross-experiments (2026-08-16): when the System32 MSVCP140 (VC++ 2015-2022 Redistributable) is **below 14.40**, the helper crashes in the `securityd_connection` mutex path (0xC0000005, NULL dereference in `_Mtx_do_lock`) before the patch can take effect. The script detects this and warns to install the latest [VC++ 2015-2022 Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) (on Win11, a Windows Update may be needed since System32's copy is an OS component).
+
 ### Why CKKS Passwords State = 1
 
-After a reinstall, the iCloud app recreates `HKCU\Software\Apple Inc.\Internet Services\CKKS\Features\Passwords` but with **State = 0** (feature-not-activated flag). Setting it to 1 completes the verification flow (it was the final piece — the popup appeared for the first time only after this).
+The iCloud Passwords feature-enable switch. On normally installed machines the app creates the key (State=1); on broken installs the key may be **entirely missing** (VM cross-experiment: working CRT + missing key → no popup, blocked by the helper's state gate; creating the key with State=1 restored it immediately). The script **auto-creates the key when missing** and sets State=1.
 
 ---
 
@@ -185,7 +190,7 @@ After a reinstall, the iCloud app recreates `HKCU\Software\Apple Inc.\Internet S
 
 | Location | Change |
 |---|---|
-| `HKCU\...\Internet Services\CKKS\Features\Passwords\State` | 0 → 1 (key recreated by Apple after reinstall; value only) |
+| `HKCU\...\Internet Services\CKKS\Features\Passwords\State` | set to 1 (key may be missing on broken installs — the script auto-creates it) |
 
 ### What `-Undo` removes
 
@@ -197,7 +202,7 @@ After a reinstall, the iCloud app recreates `HKCU\Software\Apple Inc.\Internet S
 
 ## Script Design
 
-- **Auto-elevation**: when not admin, relaunches itself via UAC (`Start-Process -Verb RunAs` with `cmd /c` output redirection; `-Verb RunAs` and `-RedirectStandardOutput` are mutually exclusive parameter sets, hence the cmd wrapper). The elevated interpreter is chosen adaptively (pwsh first, PowerShell 5.1 otherwise).
+- **Elevation strategy** (since 2026-08-16): the script **does not self-elevate** — regular users double-click `run_patch.bat` (the launcher handles UAC elevation + `-ExecutionPolicy Bypass`), power users open an admin PowerShell; running the script without admin rights only prints a hint and exits, so the launcher never triggers a second UAC prompt.
 - **PS 5.1 compatible**: `#requires -Version 5.1` + **UTF-8 with BOM** (5.1 reads BOM-less files as ANSI, which garbles Chinese text — a known pitfall).
 - **Dynamic values**: package name (`Get-AppxPackage`), ServerId (max existing + 1, or reuse if already registered), DeploymentVersion (read from existing Class entries), secd.exe path (from `InstallLocation`).
 - **Interactive menu**: live status detection (Class registered / State / marshal keys complete), with Fix / Undo / detailed status / exit; `-Fix` / `-Undo` switches for scripted use.
@@ -215,7 +220,7 @@ After a reinstall, the iCloud app recreates `HKCU\Software\Apple Inc.\Internet S
 
 - The three GUIDs (CLSID/interface/TypeLib) are stable identifiers within the iCloud product line, but if a **future version changes them**, please report it (the latest values can be extracted from the `.rgs` script embedded in `secd.exe`).
 - After an iCloud **upgrade/reinstall**, `PackagedCom` switches to the new version-numbered directory → **run the script once more**.
-- If it still fails after fixing: check whether `CKKS\Features\Passwords\State` was reset to 0 by the app (set it to 1, then restart Edge).
+- If it still fails after fixing: first check the script's "read-back verification" (all passed?); then check `CKKS\Features\Passwords\State` (set to 1, restart Edge) and the MSVCP140 version (≥14.40).
 
 ---
 

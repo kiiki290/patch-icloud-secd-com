@@ -29,45 +29,52 @@
 2. 但**验证码弹窗**（显示 6 位数字的小窗口，`#32770` 对话框）**永远不出现**
 3. 约 20~30 秒后扩展报错："在 Windows 版 iCloud 中启用"密码"以配合 Edge 使用 iCloud 密码"
 
-通常发生在**重装或升级 iCloud for Windows 之后**。未重装过的电脑（或历史注册还保留的电脑）没有此问题。
+**触发条件**（2026-08-15 VM 复现实验实锤）：在 **WindowsApps 文件夹权限已被提权**
+（普通用户获得完全控制）的**状态下安装/重装** iCloud 即会失效——无需卸载重装，
+提权状态下首次安装同样触发；权限正常的机器安装则不受影响。
 
 ## 快速使用
 
 ```powershell
-# 普通 PowerShell 即可（非管理员会自动弹 UAC 提权）
+# 普通用户：直接双击 run_patch.bat（自动请求管理员权限）
+# 专业用户：右键"终端(管理员)"或"Windows PowerShell(管理员)"打开后：
 pwsh -File patch_icloud_secd_com.ps1        # 交互式菜单（推荐）
 pwsh -File patch_icloud_secd_com.ps1 -Fix   # 直接修复
 pwsh -File patch_icloud_secd_com.ps1 -Undo  # 直接撤销
 ```
 
-右键"使用 PowerShell 运行"也可（脚本兼容 PS 5.1 与 PS 7，自动提权）。
+右键"使用 PowerShell 运行"也可（脚本兼容 PS 5.1 与 PS 7）。**脚本不做自动提权**：
+非管理员运行仅提示，需自行用 run_patch.bat 或以管理员方式打开。
 
 ## 工具使用方法
 
 ### 运行方式
 
-三种方式任选，普通（非管理员）PowerShell 即可，需要时自动弹 UAC 提权：
-
 | 方式 | 命令 |
 |---|---|
-| 交互式菜单（推荐） | `pwsh -File patch_icloud_secd_com.ps1` |
-| 直接修复 | `pwsh -File patch_icloud_secd_com.ps1 -Fix` |
-| 直接撤销 | `pwsh -File patch_icloud_secd_com.ps1 -Undo` |
+| 双击启动器（推荐，自动提权 + 绕过执行策略） | `run_patch.bat` |
+| 交互式菜单（需管理员） | `pwsh -File patch_icloud_secd_com.ps1` |
+| 直接修复（需管理员） | `pwsh -File patch_icloud_secd_com.ps1 -Fix` |
+| 直接撤销（需管理员） | `pwsh -File patch_icloud_secd_com.ps1 -Undo` |
 
 ### 交互菜单
 
 ![交互菜单](images/01-menu.png)
 
-运行后自动检测当前状态并显示菜单：
+运行后自动检测当前状态并显示菜单（双模式）：
 
 - **当前状态**（自动检测）：
   - `✅ 已修复` — Class 注册 + State=1 齐全
   - `⚠️ 部分修复` — 部分项存在（常见：只差 State 或 Class）
   - `❌ 未修复` — 全部缺失（重装后的典型状态）
-- **[1] 执行修复**：弹 UAC → 提权写入全部注册表项 → 输出回显
-- **[2] 撤销修复**：弹 UAC → 删除全部写入项（State 保留）
-- **[3] 查看详细状态**：只读展示 包/Class/Server/TypeLib/Interface/State
+  - 另显示 WindowsApps 权限是否异常、MSVCP140（VC++ 运行库）版本
+- **[1] 急救修复**：写入 PackagedCom 打包 COM 声明（不重装，立即恢复弹窗）
+- **[2] 治本修复**：还原 WindowsApps 权限 + 引导重装（一劳永逸，无需补丁）
+- **[3] 撤销修复**：删除急救写入项（State 保留）
+- **[4] 查看详细状态**：只读展示 包/Class/Server/TypeLib/Interface/State/权限/CRT
 - **[0] 退出**
+
+已管理员时 [1]/[2]/[3] 直接执行；未管理员仅提示提权方式（用 run_patch.bat 或管理员窗口）。
 
 ### 修复输出
 
@@ -115,23 +122,23 @@ secd 的注册由 iCloud 运行时流程写入（secd 内置 ATL `.rgs` 脚本�
 `CLSID\{CE6AF8E5}='SecDaemon Class'` + `LocalServer32='%MODULE%'` +
 `TypeLib={71529314-...}`），**仅在首次安装时执行**。
 
-### 3. Apple 的缺陷：重装后注册丢失且永不重建
+### 3. 真正的根因：提权状态下安装 → 打包注册挂载机制静默失效（2026-08-15 实锤修正）
 
-**卸载重装 iCloud 后，隔离视图中的这条注册被清除，且 iCloud 的运行时注册器
-在本机从未重新成功执行**（实测：多次重启全家、开关"密码"功能、退出重登均不重建）。
-此后：
+**卸载重装本身不会导致失效**（VM A/B 实验：标准权限下卸载重装 → 弹窗正常）；
+**WindowsApps 权限已提权时安装** → 直接失效（首次安装同样触发，无需重装）。
 
-```
-helper 的 CoCreateInstance → RPCSS 在所有视图都找不到 CLSID → 0x80040154 (CLASSNOTREG)
-→ helper 抛 _com_error → 回 {"cmd":10} → 扩展显示"启用密码"错误 → 弹窗永不出现
-```
+故障机理：提权状态下，secd 的运行时自注册**写进了包内 `Registry.dat`**（App-V
+风格的注册表文件虚拟化；证据：故障态 Registry.dat 内含完整 SecDaemon Class +
+ISecDaemon marshal + TypeLib 注册），但 **RPCSS 的 COMROOT 解析不到这份注册**
+→ helper CoCreateInstance 0x80040154 (CLASSNOTREG) → 回 {"cmd":10} → 弹窗不出现。
 
-**对比证据**：从未重装过的正常电脑，其 RPCSS 能从隔离视图打开该 CLSID（ETW 实锤，
-`Status=0x0`）；本机所有路径均 `0xC0000034`。远端电脑的真实注册表（HKCR、
-PackagedCom、HKCU Classes）也**同样没有**这条注册——它只存在于隔离视图。
+**对比证据**：正常权限安装的电脑，RPCSS 能从隔离视图打开该 CLSID；本机故障态
+所有路径均解析失败。远端真实注册表（HKCR、PackagedCom、HKCU Classes）同样
+没有这条注册——它只存在于隔离视图。
 
-> 补充：凌晨曾误判根因为 `p222-contactsws.icloud.com` DNS 退役（中国区账号卡顿），
-> 已推翻——远端同样 NXDOMAIN 但功能正常。p222 只解释应用启动卡顿，与弹窗无关。
+> 补充：早期曾误判根因为 `p222-contactsws.icloud.com` DNS 退役（中国区账号卡顿）
+> 与「重装后注册丢失」——均已推翻/修正：p222 只解释应用启动卡顿，与弹窗无关；
+> 「注册丢失」实为挂载失效（8-15 深夜修正，见归档 README）。
 
 ---
 
@@ -179,11 +186,20 @@ TypeLib 引用与代理信息。实测 helper/secd 启动时**反复查询**这�
 证据），缺失会导致调用失败。脚本在 **HKCU + HKLM 两侧**补齐（打包进程的用户视图
 与系统视图都能解析）。
 
+### 前置条件：VC++ 运行库（MSVCP140 ≥ 14.4x）
+
+VM 交叉实验（2026-08-16）：System32 的 MSVCP140（VC++ 2015-2022 运行库）
+**低于 14.40** 时，helper 会在连接 secd 的 `securityd_connection` 互斥锁路径
+崩溃（0xC0000005，`_Mtx_do_lock` 空指针解引用）——补丁根本来不及生效。
+脚本内置检测：`<14.40` 时警告先装
+[VC++ 2015-2022 Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe)
+（Win11 系统组件场景可先做 Windows 更新）。
+
 ### 为什么需要 CKKS Passwords State = 1
 
-重装后 iCloud 应用重建了 `HKCU\Software\Apple Inc.\Internet Services\
-CKKS\Features\Passwords` 键，但 **State = 0**（功能未激活标志）。置 1 后
-验证码流程完整走通（这是最后一块拼图——置 1 后弹窗首次出现）。
+iCloud「密码」功能的启用状态开关。正常安装的机器上应用会创建该键（State=1）；
+故障/坏装机器上该键可能**完全缺失**（VM 交叉实验：CRT 正常 + 无此键 → 弹窗不出，
+被 helper 的状态门挡住；建键置 1 后立即恢复）。脚本**键缺失时自动创建**并置 1。
 
 ---
 
@@ -205,11 +221,11 @@ CKKS\Features\Passwords` 键，但 **State = 0**（功能未激活标志）。�
 | 10 | `HKCU\Software\Classes\Interface\{E095A809}` | TypeLib={71529314}、TypeLib\Version=1.0、Version=1.0、ProxyStubClsid32={00020424-...} | 接口编组解析 |
 | 11 | `HKLM\SOFTWARE\Classes\Interface\{E095A809}` | 同上 | 系统视图双保险 |
 
-### 改动（1 个值）
+### 改动（1 个值；键缺失时自动创建）
 
 | 位置 | 改动 |
 |---|---|
-| `HKCU\...\Internet Services\CKKS\Features\Passwords\State` | 0 → 1（重装后 Apple 建的值，仅改值） |
+| `HKCU\...\Internet Services\CKKS\Features\Passwords\State` | 置 1（正常装该键存在仅改值；坏装/重装后可能缺失 → 脚本自动创建） |
 
 ### 撤销（`-Undo`）删除什么
 
@@ -221,15 +237,23 @@ CKKS\Features\Passwords` 键，但 **State = 0**（功能未激活标志）。�
 
 ## 脚本设计细节
 
-- **自动提权**：非管理员运行时弹 UAC 重启自己（`Start-Process -Verb RunAs` +
-  `cmd /c` 输出重定向回显，`-Verb RunAs` 与 `-RedirectStandardOutput` 参数集互斥
-  故走 cmd）；提权解释器自适应（优先 pwsh，无则 PS 5.1）
+- **提权策略**（v2026-08-16 起）：脚本**不做自动提权**——普通用户双击
+  `run_patch.bat`（启动器负责 UAC 提权 + `-ExecutionPolicy Bypass`），专业用户
+  自开管理员 PowerShell；非管理员运行脚本仅打印提示并退出，避免 bat 提权后
+  菜单再弹一次 UAC
 - **5.1 兼容**：`#requires -Version 5.1` + **UTF-8 带 BOM**（5.1 按 ANSI 读
   无 BOM 的含中文脚本会解析错乱——踩过的坑）
 - **动态取值**：包名（`Get-AppxPackage`）、ServerId（现有最大 +1，已注册则复用）、
   DeploymentVersion（读取现有 Class 的值）、secd.exe 路径（`InstallLocation`）
-- **交互菜单**：实时状态检测（Class 是否注册 / State / marshal 是否齐全），
-  选择修复 / 撤销 / 详细状态 / 退出；命令行模式 `-Fix` / `-Undo` 供脚本化调用
+- **交互菜单**：实时状态检测（Class 是否注册 / State / marshal 是否齐全 /
+  WindowsApps 权限 / MSVCP140 版本），选择修复 / 撤销 / 详细状态 / 退出；
+  命令行模式 `-Fix` / `-Cure` / `-Undo` 供脚本化调用（退出码透传）
+- **回读校验**：Do-Fix 收尾逐项比对 10 个关键注册项，写失败（默认静默）会被
+  检出并标红，不再「假成功」
+- **撤销保护**：Do-Undo 只删本工具写入的 TypeLib/Interface 键（校验 (default)
+  值），补丁前已存在的同 GUID 注册不会被误删
+- **多包过滤**：`Get-ICloudPackage` 过滤 Staged 残留包（部署「失忆」场景），
+  取最新已安装版本
 
 ---
 
@@ -245,8 +269,8 @@ CKKS\Features\Passwords` 键，但 **State = 0**（功能未激活标志）。�
 - 三个 GUID（CLSID/接口/TypeLib）是 iCloud 产品线内的稳定标识，但**未来版本若变更
   导致失效**，请反馈（可对照 `secd.exe` 内置 .rgs 提取最新值）
 - iCloud **升级/重装**后 `PackagedCom` 会切到新版本号目录 → **重跑一次脚本**即可
-- 若修复后仍失败：检查 `CKKS\Features\Passwords\State` 是否被应用写回 0
-  （置 1 后重启 Edge）
+- 若修复后仍失败：先看脚本输出的「回读校验」是否全过；再检查
+  `CKKS\Features\Passwords\State`（置 1 后重启 Edge）与 MSVCP140 版本（≥14.40）
 
 ---
 

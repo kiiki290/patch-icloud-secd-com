@@ -1,25 +1,30 @@
 ﻿#requires -Version 5.1
 # ============================================================
-# iCloud Passwords 验证码弹窗修复工具（交互式）
+# iCloud Passwords 验证码弹窗修复工具（交互式，双模式）
 #
-# 背景：iCloud for Windows 重装/升级后，secd.exe 的 COM 类
-#   {CE6AF8E5-3A75-4AF5-BD59-C42E7228B4F4} 在打包应用隔离视图的注册丢失且
-#   永不重建（Apple bug）→ helper 的 CoCreateInstance 返回 0x80040154
-#   → 点击扩展永远显示"在 Windows 版 iCloud 中启用密码"，验证码弹窗不出现。
+# 背景：iCloud Passwords 扩展验证码弹窗失效的根因（2026-08-15 实锤）：
+#   在 WindowsApps 权限已被提权（普通用户获得完全控制）的状态下安装 iCloud，
+#   secd 的 COM 注册挂载机制静默失效（注册写进包内 Registry.dat 但 RPCSS 解析
+#   不到）→ helper CoCreateInstance 0x80040154 → 弹窗不出现。
 #
-# 原理：在真实注册表 HKLM\SOFTWARE\Classes\PackagedCom 下模拟"打包 COM 声明"
-#   （MSIX 包清单 com:Class 的物化位置），让 SCM 以打包身份激活 secd；
-#   并补齐跨进程 marshal 所需的 TypeLib/Interface 注册和 CKKS Passwords State=1。
+# 两种修复：
+#   [急救] -Fix ：不重装，在真实注册表 HKLM\SOFTWARE\Classes\PackagedCom 下
+#           模拟"打包 COM 声明"（让 SCM 以打包身份激活 secd），立即恢复弹窗
+#   [治本] -Cure：还原 WindowsApps 标准 ACL + 引导用户重装 iCloud，
+#           实测重装后弹窗直接正常、无需补丁
 #
-# 用法：
-#   pwsh -File patch_icloud_secd_com.ps1            # 交互式菜单（推荐）
-#   pwsh -File patch_icloud_secd_com.ps1 -Fix       # 直接修复（自动提权）
-#   pwsh -File patch_icloud_secd_com.ps1 -Undo      # 直接撤销（自动提权）
+# 用法（需要管理员权限；脚本不做自动提权，仅提示）：
+#   run_patch.bat                                  # 普通用户：双击启动器（自动提权 + 绕过执行策略）
+#   pwsh -File patch_icloud_secd_com.ps1           # 交互式菜单
+#   pwsh -File patch_icloud_secd_com.ps1 -Fix      # 急救修复
+#   pwsh -File patch_icloud_secd_com.ps1 -Cure     # 治本修复
+#   pwsh -File patch_icloud_secd_com.ps1 -Undo     # 撤销急救修复
+#   专业用户建议直接开管理员 PowerShell 运行；非管理员时脚本仅提示，需自行提权。
 #
-# 兼容：iCloud for Windows 15.9.60.0 实测通过（Windows 11 26100，Edge）。
+# 兼容：iCloud for Windows 15.9.60.0 实测通过（Windows 11 26100/26200，Edge）。
 # ============================================================
 
-param([switch]$Undo, [switch]$Fix)
+param([switch]$Undo, [switch]$Fix, [switch]$Cure)
 
 # 强制 UTF-8 输出（cmd 重定向提权实例输出时避免 GBK 乱码）
 $OutputEncoding = [System.Text.Encoding]::UTF8
@@ -33,31 +38,61 @@ function Info($msg) { Write-Host "  $msg" -ForegroundColor Cyan }
 function Ok($msg)   { Write-Host "  [OK] $msg" -ForegroundColor Green }
 function Warn($msg) { Write-Host "  [!!] $msg" -ForegroundColor Yellow }
 
-# ---------- 提权执行（非管理员时通过 UAC 重启自己） ----------
-# 说明：Start-Process -Verb RunAs 与 -RedirectStandardOutput 属于互斥参数集，
-# 因此用 cmd /c 重定向把提权实例的输出写入临时文件，父进程等待后回显。
-function Invoke-Elevated([string]$Mode) {
-    # 提权解释器自适应：有 PS7 用 pwsh，否则退回系统自带的 PowerShell 5.1
-    $shellExe = if (Get-Command pwsh -ErrorAction SilentlyContinue) { 'pwsh' } else { 'powershell.exe' }
-    $outFile = Join-Path $env:TEMP "icloud-patch-out-$PID.log"
-    $cmdLine = "$shellExe -NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -$Mode > `"$outFile`" 2>&1"
-    try {
-        $p = Start-Process cmd -Verb RunAs -Wait -PassThru -ArgumentList '/c', "`"$cmdLine`""
-        if (Test-Path $outFile) {
-            # 日志走信息流（Write-Host），这样 $null = 吞退出码时不会连日志一起吞掉
-            Write-Host (Get-Content $outFile -Raw -Encoding UTF8)
-        }
-        Remove-Item $outFile -Force -ErrorAction SilentlyContinue
-        return $p.ExitCode
-    } catch {
-        Write-Host "提权失败或已被取消：$($_.Exception.Message)" -ForegroundColor Red
-        return 1
+# 是否已是管理员（bat 启动器已提权时全程为真，提权分支自动短路）
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+# ---------- 管理员检查（不做自动提权，仅提示） ----------
+function Test-Admin {
+    if (-not $isAdmin) {
+        Write-Host '需要管理员权限才能执行本操作。' -ForegroundColor Red
+        Write-Host '  方式一：双击 run_patch.bat（自动请求管理员权限）' -ForegroundColor Yellow
+        Write-Host '  方式二：右键开始菜单 → "终端(管理员)" 或 "Windows PowerShell(管理员)"，再运行本脚本' -ForegroundColor Yellow
+        return $false
     }
+    return $true
+}
+
+# ---------- WindowsApps 权限检测（治本修复的状态依据） ----------
+# 标准 ACL 的 8 个主体（SID 形式，与全新 VM 逐条核对过）
+$StdAclSids = @(
+    'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464', # NT SERVICE\TrustedInstaller
+    'S-1-15-3-1024-3635283841-2530182609-996808640-1887759898-3848208603-3313616867-983405619-2501854204', # 包能力 SID
+    'S-1-5-18',  # NT AUTHORITY\SYSTEM
+    'S-1-5-32-544', # BUILTIN\Administrators
+    'S-1-5-19',  # NT AUTHORITY\LOCAL SERVICE
+    'S-1-5-20',  # NT AUTHORITY\NETWORK SERVICE
+    'S-1-5-12',  # NT AUTHORITY\RESTRICTED
+    'S-1-5-32-545' # BUILTIN\Users
+)
+function Resolve-Sid([string]$Principal) {
+    if ($Principal -match '^S-1-') { return $Principal }
+    try { return ([System.Security.Principal.NTAccount]::new($Principal)).Translate([System.Security.Principal.SecurityIdentifier]).Value }
+    catch { return $Principal }
+}
+# 返回 WindowsApps 根 ACL 中非标准主体的列表（空 = 标准）
+function Get-WindowsAppsAnomaly {
+    $lines = icacls 'C:\Program Files\WindowsApps' 2>&1
+    $extra = @()
+    foreach ($line in $lines) {
+        if ($line -match '^[^:]+:\(') {
+            $p = ($line -split ':')[0].Trim()
+            if ($p -and (Resolve-Sid $p) -notin $StdAclSids) { $extra += $p }
+        }
+    }
+    return ,$extra
+}
+
+# ---------- 取 iCloud 包（过滤 Staged 残留，取最新版本——部署「失忆」时同名包可能并存） ----------
+function Get-ICloudPackage {
+    Get-AppxPackage AppleInc.iCloud -ErrorAction SilentlyContinue |
+        Where-Object { $_.Status -notmatch 'Staged' } |
+        Sort-Object Version -Descending |
+        Select-Object -First 1
 }
 
 # ---------- 状态检测（只读） ----------
 function Get-PatchStatus {
-    $appx = Get-AppxPackage AppleInc.iCloud -ErrorAction SilentlyContinue
+    $appx = Get-ICloudPackage
     if (-not $appx) {
         return [pscustomobject]@{ Installed = $false; ClassExists = $false; ServerId = $null; State = $null; TypeLibOk = $false; InterfaceOk = $false; Summary = 'iCloud 未安装' }
     }
@@ -67,27 +102,97 @@ function Get-PatchStatus {
     $state = (Get-ItemProperty 'HKCU:\Software\Apple Inc.\Internet Services\CKKS\Features\Passwords' -Name State -ErrorAction SilentlyContinue).State
     $typeLibOk = Test-Path "HKCU:\Software\Classes\TypeLib\{$tlid}\1.0\0\win32"
     $interfaceOk = Test-Path "HKCU:\Software\Classes\Interface\{$iid}"
-    $summary = if ($serverId -ne $null) {
-        if ($state -eq 1) { '✅ 已修复' } else { '⚠️ 部分（Class 已注册，State 未激活）' }
-    } elseif ($state -eq 1 -or $typeLibOk -or $interfaceOk) {
-        '⚠️ 部分修复（Class 未注册，其他项存在）'
+    $permAnomaly = Get-WindowsAppsAnomaly
+    if ($serverId -ne $null -and $state -eq 1) {
+        $summary = '✅ 已修复（急救补丁生效）'
+    } elseif ($permAnomaly.Count -eq 0 -and $serverId -eq $null) {
+        $summary = '✅ 权限正常（若弹窗失效，先试 -Cure 重装；若已装好则无需处理）'
+    } elseif ($permAnomaly.Count -gt 0) {
+        $summary = "⚠️ WindowsApps 权限异常（$($permAnomaly -join ', ')）——弹窗失效的根因，建议治本修复 [-Cure]"
+    } elseif ($serverId -ne $null) {
+        $summary = '⚠️ 部分（Class 已注册，State 未激活）'
     } else {
-        '❌ 未修复'
+        $summary = '❌ 未修复'
     }
-    return [pscustomobject]@{ Installed = $true; ClassExists = ($serverId -ne $null); ServerId = $serverId; State = $state; TypeLibOk = $typeLibOk; InterfaceOk = $interfaceOk; Summary = $summary }
+    return [pscustomobject]@{ Installed = $true; ClassExists = ($serverId -ne $null); ServerId = $serverId; State = $state; TypeLibOk = $typeLibOk; InterfaceOk = $interfaceOk; PermAnomaly = $permAnomaly; Summary = $summary }
 }
 
-# ---------- 修复 ----------
+# ---------- CRT 版本检测（旧版 MSVCP140 已知 bug：helper 连接 secd 时崩溃） ----------
+function Test-CrtVersion {
+    $dll = Get-Item 'C:\Windows\System32\MSVCP140.dll' -ErrorAction SilentlyContinue
+    if (-not $dll) { return }
+    $v = $dll.VersionInfo.FileVersion
+    try { $ver = [version]$v } catch { return }
+    if ($ver.Major -eq 14 -and $ver.Minor -lt 40) {
+        Warn "检测到旧版 VC++ 运行库 MSVCP140.dll $v"
+        Warn '  14.3x 及更早有已知 bug：helper 在连接 secd 时崩溃（0xC0000005），补丁将无法生效。'
+        Warn '  请先安装最新 VC++ 2015-2022 Redistributable：https://aka.ms/vs/17/release/vc_redist.x64.exe'
+        Warn '  （Win11 系统组件场景可先做 Windows 更新；升级后重新运行本工具）'
+    } else {
+        Ok "MSVCP140.dll $v（CRT 正常）"
+    }
+}
+
+# ---------- Do-Fix 收尾回读校验（写失败默认静默，这里逐项比对） ----------
+function Test-PatchIntegrity([int]$serverId) {
+    $appx = Get-ICloudPackage
+    if (-not $appx) { return ,@('iCloud 包不存在') }
+    $pkgRoot = "HKLM:\SOFTWARE\Classes\PackagedCom\Package\$($appx.PackageFullName)"
+    $bad = @()
+    $classServerId = (Get-ItemProperty "$pkgRoot\Class\{$clsid}" -Name ServerId -ErrorAction SilentlyContinue).ServerId
+    if ($classServerId -ne $serverId) { $bad += "Class\{$clsid} ServerId（期望 $serverId，实际 $classServerId）" }
+    $exe = (Get-ItemProperty "$pkgRoot\Server\$serverId" -Name Executable -ErrorAction SilentlyContinue).Executable
+    if ($exe -ne 'iCloud\secd.exe') { $bad += "Server\$serverId Executable" }
+    if (-not (Test-Path "$pkgRoot\Interface\{$iid}")) { $bad += "Interface\{$iid}" }
+    if (-not (Test-Path "$pkgRoot\TypeLib\{$tlid}\1.0")) { $bad += "TypeLib\{$tlid}\1.0" }
+    if (-not (Test-Path "HKLM:\SOFTWARE\Classes\PackagedCom\ClassIndex\{$clsid}\$($appx.PackageFullName)")) { $bad += 'ClassIndex' }
+    if (-not (Test-Path "HKLM:\SOFTWARE\Classes\PackagedCom\InterfaceIndex\{$iid}\$($appx.PackageFullName)")) { $bad += 'InterfaceIndex' }
+    if (-not (Test-Path "HKLM:\SOFTWARE\Classes\PackagedCom\TypeLibIndex\{$tlid}\$($appx.PackageFullName)")) { $bad += 'TypeLibIndex' }
+    if (-not (Test-Path 'HKCU:\Software\Classes\TypeLib\{71529314-E4B7-400B-8FD7-9A5F695AF311}\1.0\0\win32')) { $bad += 'HKCU TypeLib marshal' }
+    if (-not (Test-Path 'HKCU:\Software\Classes\Interface\{E095A809-7CDD-4B6D-A528-5D4AC9420D91}')) { $bad += 'HKCU Interface marshal' }
+    if ((Get-ItemProperty 'HKCU:\Software\Apple Inc.\Internet Services\CKKS\Features\Passwords' -Name State -ErrorAction SilentlyContinue).State -ne 1) { $bad += 'CKKS State' }
+    return ,$bad
+}
+
+# ---------- 治本修复：还原 WindowsApps 权限 + 引导重装 ----------
+function Do-Cure {
+    Write-Host '== 治本修复：还原 WindowsApps 权限 + 重装 iCloud ==' -ForegroundColor White
+    Test-CrtVersion
+    $extra = Get-WindowsAppsAnomaly
+    if ($extra.Count -eq 0) {
+        Ok 'WindowsApps 权限已是标准 ACL，无需还原'
+    } else {
+        Write-Host "发现非标准权限条目：$($extra -join ', ')" -ForegroundColor Yellow
+        foreach ($p in $extra) {
+            icacls 'C:\Program Files\WindowsApps' /remove "$p" | Out-Null
+            Write-Host "  已移除: $p"
+        }
+        $after = Get-WindowsAppsAnomaly
+        if ($after.Count -eq 0) { Ok 'WindowsApps 权限已还原为标准 ACL' }
+        else { Warn "仍有非标准条目：$($after -join ', ')" }
+    }
+    Write-Host ''
+    Write-Host '下一步（需手动完成，顺序不能反）：' -ForegroundColor Cyan
+    Write-Host '  1. 卸载当前 iCloud（设置 > 应用 > iCloud > 卸载，或开始菜单右键卸载）'
+    Write-Host '  2. 从 Microsoft Store 重新安装 iCloud'
+    Write-Host '  3. 登录 Apple ID（两步验证）→ 开启"密码"功能'
+    Write-Host '  4. 重启 Edge → 点击扩展图标 → 验证码弹窗应直接出现（无需补丁）'
+    Write-Host '  ⚠️ 卸载会清空本地钥匙串，重装登录后自动从 iCloud 重新同步'
+    Write-Host '  ⚠️ 重装完成前不要再改 WindowsApps 权限（安装时刻的权限状态决定成败）'
+}
+
+# ---------- 急救修复：PackagedCom 模拟 ----------
 function Do-Fix {
-    Write-Host '== 写入 PackagedCom 打包 COM 声明 ==' -ForegroundColor White
-    $appx = Get-AppxPackage AppleInc.iCloud -ErrorAction SilentlyContinue
-    if (-not $appx) { Warn '未检测到 AppleInc.iCloud 包，请先安装 iCloud for Windows。'; exit 1 }
+    Write-Host '== 急救修复：写入 PackagedCom 打包 COM 声明（不重装） ==' -ForegroundColor White
+    Test-CrtVersion
+    $appx = Get-ICloudPackage
+    if (-not $appx) { Warn '未检测到 AppleInc.iCloud 包，请先安装 iCloud for Windows。'; return 1 }
     $pkgFull = $appx.PackageFullName
     $pkgRoot = "HKLM:\SOFTWARE\Classes\PackagedCom\Package\$pkgFull"
     $secdPath = Join-Path $appx.InstallLocation 'iCloud\secd.exe'
     Info "iCloud 包: $pkgFull"
     Info "secd.exe: $secdPath"
-    if (-not (Test-Path $secdPath)) { Warn 'secd.exe 不存在于包内（版本结构不同？），终止。'; exit 1 }
+    if (-not (Test-Path $secdPath)) { Warn 'secd.exe 不存在于包内（版本结构不同？），终止。'; return 1 }
 
     # ServerId：已注册则复用（幂等），否则取现有最大值 +1
     $existingServerId = (Get-ItemProperty "$pkgRoot\Class\{$clsid}" -Name ServerId -ErrorAction SilentlyContinue).ServerId
@@ -120,7 +225,7 @@ function Do-Fix {
     # 2. ExeServer entry
     $k = "$pkgRoot\Server\$serverId"; New-Item $k -Force | Out-Null
     Set-ItemProperty $k -Name ApplicationId -Value 'iCloud' -Type String
-    Set-ItemProperty $k -Name ApplicationDisplayName -Value "@{$pkgFull?ms-resource://AppleInc.iCloud/resources/iCloudHomeUIDisplayName}" -Type String
+    Set-ItemProperty $k -Name ApplicationDisplayName -Value ('@{' + $pkgFull + '?ms-resource://AppleInc.iCloud/resources/iCloudHomeUIDisplayName}') -Type String
     Set-ItemProperty $k -Name DisplayName -Value 'SecDaemon COM Server' -Type String
     Set-ItemProperty $k -Name Executable -Value 'iCloud\secd.exe' -Type String
     Set-ItemProperty $k -Name IsSystemExecutable -Value 0 -Type DWord
@@ -179,27 +284,38 @@ function Do-Fix {
     }
     Ok 'TypeLib / Interface（HKCU + HKLM 两侧）'
 
-    # 7. CKKS Passwords State
+    # 7. CKKS Passwords State（键缺失也创建——坏装机器上该键常不存在，缺它弹窗不出）
     Write-Host '== CKKS Passwords State ==' -ForegroundColor White
     $ckks = 'HKCU:\Software\Apple Inc.\Internet Services\CKKS\Features\Passwords'
-    if (Test-Path $ckks) {
-        Set-ItemProperty $ckks -Name 'State' -Value 1 -Type DWord
-        Ok 'State = 1'
+    if (-not (Test-Path $ckks)) {
+        New-Item $ckks -Force | Out-Null
+        Warn 'CKKS Passwords 键缺失，已自动创建（坏装机器常见；正常装由应用自建）'
+    }
+    Set-ItemProperty $ckks -Name 'State' -Value 1 -Type DWord
+    Ok 'State = 1'
+
+    # 8. 回读校验（写失败会静默，必须逐项确认）
+    Write-Host '== 回读校验 ==' -ForegroundColor White
+    $bad = Test-PatchIntegrity -serverId $serverId
+    if ($bad.Count -eq 0) {
+        Ok '回读校验全部通过'
     } else {
-        Warn 'CKKS Passwords 键不存在（可能版本不同）；若修复后弹窗不出现，检查该键。'
+        Warn ('回读校验失败（' + $bad.Count + ' 项）：' + ($bad -join '；'))
+        return 1
     }
 
     Write-Host ''
     Write-Host '✅ 修复完成。下一步：' -ForegroundColor Green
     Write-Host '  1. 完全关闭 Edge（所有窗口）再重新打开'
     Write-Host '  2. 点击 iCloud Passwords 扩展图标，输入验证码'
+    return 0
 }
 
 # ---------- 撤销 ----------
 function Do-Undo {
     Write-Host '== 撤销模式：删除修复写入的注册表项 ==' -ForegroundColor White
-    $appx = Get-AppxPackage AppleInc.iCloud -ErrorAction SilentlyContinue
-    if (-not $appx) { Warn '未检测到 AppleInc.iCloud 包。'; exit 1 }
+    $appx = Get-ICloudPackage
+    if (-not $appx) { Warn '未检测到 AppleInc.iCloud 包。'; return 1 }
     $pkgRoot = "HKLM:\SOFTWARE\Classes\PackagedCom\Package\$($appx.PackageFullName)"
     $targets = @(
         "$pkgRoot\Class\{$clsid}",
@@ -221,13 +337,23 @@ function Do-Undo {
         }
     }
     foreach ($t in $targets) {
-        if (Test-Path $t) {
-            Remove-Item $t -Recurse -Force
-            Ok "已删除: $($t -replace '^Microsoft\.PowerShell\.Core\\Registry::', '')"
+        if (-not (Test-Path $t)) { continue }
+        # 误删保护：HKCR/HKCU 的 TypeLib/Interface 键只在 (default) 值是我们写的
+        # 时才删——补丁前已存在的同 GUID 注册（正常安装态）不能动
+        if ($t -match '\\TypeLib\\' -or $t -match '\\Interface\\') {
+            $def = (Get-ItemProperty $t -Name '(default)' -ErrorAction SilentlyContinue).'(default)'
+            $expect = if ($t -match '\\TypeLib\\') { 'SecDaemon 1.0 Type Library' } else { 'ISecDaemon' }
+            if ($def -ne $expect) {
+                Warn "跳过（非本工具写入，保留）: $($t -replace '^Microsoft\.PowerShell\.Core\\Registry::', '')"
+                continue
+            }
         }
+        Remove-Item $t -Recurse -Force
+        Ok "已删除: $($t -replace '^Microsoft\.PowerShell\.Core\\Registry::', '')"
     }
-    Warn 'CKKS Passwords\State 未被改动（如需恢复请手动设回 0）。'
+    Warn 'CKKS Passwords 键未被撤销（State 保留 1；如需彻底回滚可删除 HKCU:\Software\Apple Inc.\Internet Services\CKKS，注意应用可能自行重建）'
     Write-Host '撤销完成。重启 Edge 验证。' -ForegroundColor Green
+    return 0
 }
 
 # ============================================================
@@ -245,24 +371,30 @@ if (-not $Undo -and -not $Fix) {
         Write-Host ''
         Write-Host "  当前状态：$($st.Summary)" -ForegroundColor $(if ($st.ClassExists -and $st.State -eq 1) { 'Green' } else { 'Yellow' })
         Write-Host ''
-        Write-Host '  [1] 执行修复'
-        Write-Host '  [2] 撤销修复（回滚）'
-        Write-Host '  [3] 查看详细状态'
+        Write-Host '  [1] 急救修复（PackagedCom 补丁，不重装）'
+        Write-Host '  [2] 治本修复（还原 WindowsApps 权限 + 引导重装）'
+        Write-Host '  [3] 撤销急救修复（回滚）'
+        Write-Host '  [4] 查看详细状态'
         Write-Host '  [0] 退出'
         Write-Host ''
-        $choice = Read-Host '  请选择 (0-3)'
+        $choice = Read-Host '  请选择 (0-4)'
         switch ($choice) {
             '1' {
-                Write-Host ''; Write-Host '正在请求提升权限执行修复（UAC 请点"是"）...' -ForegroundColor Yellow
-                $null = Invoke-Elevated 'Fix'   # 吞掉退出码返回值（避免泄漏输出 "0"）
+                Write-Host ''
+                if (Test-Admin) { Do-Fix }
                 Write-Host ''; $null = Read-Host '按回车返回菜单'
             }
             '2' {
-                Write-Host ''; Write-Host '正在请求提升权限执行撤销（UAC 请点"是"）...' -ForegroundColor Yellow
-                $null = Invoke-Elevated 'Undo'  # 同上
+                Write-Host ''
+                if (Test-Admin) { Do-Cure }
                 Write-Host ''; $null = Read-Host '按回车返回菜单'
             }
             '3' {
+                Write-Host ''
+                if (Test-Admin) { Do-Undo }
+                Write-Host ''; $null = Read-Host '按回车返回菜单'
+            }
+            '4' {
                 Write-Host ''
                 Write-Host '  --- 详细状态 ---'
                 $appx = Get-AppxPackage AppleInc.iCloud -ErrorAction SilentlyContinue
@@ -279,6 +411,9 @@ if (-not $Undo -and -not $Fix) {
                     Write-Host "  HKCU TypeLib 注册：$($st.TypeLibOk)"
                     Write-Host "  HKCU Interface 注册：$($st.InterfaceOk)"
                     Write-Host "  CKKS Passwords State：$(if ($st.State -ne $null) { $st.State } else { '（键不存在）' })"
+                    Write-Host "  WindowsApps 权限：$(if ($st.PermAnomaly.Count -eq 0) { '标准' } else { '异常: ' + ($st.PermAnomaly -join ', ') })"
+                    $crt = (Get-Item 'C:\Windows\System32\MSVCP140.dll' -ErrorAction SilentlyContinue).VersionInfo.FileVersion
+                    Write-Host "  MSVCP140（VC++ 运行库）：$crt"
                 }
                 Write-Host ''; $null = Read-Host '按回车返回菜单'
             }
@@ -289,12 +424,10 @@ if (-not $Undo -and -not $Fix) {
     exit 0
 }
 
-# ============ 命令行模式（-Fix / -Undo，自动提权） ============
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+# ============ 命令行模式（-Fix / -Cure / -Undo） ============
 if (-not $isAdmin) {
-    Write-Host '当前不是管理员，正在请求提升权限（请在 UAC 对话框中点击"是"）...' -ForegroundColor Yellow
-    $mode = if ($Fix) { 'Fix' } else { 'Undo' }
-    $null = Invoke-Elevated $mode   # 吞掉退出码返回值（避免泄漏输出 "0"）
-    exit $LASTEXITCODE
+    Write-Host '需要管理员权限：普通用户请双击 run_patch.bat；专业用户请以管理员身份打开 PowerShell 后重试。' -ForegroundColor Red
+    exit 1
 }
-if ($Fix) { Do-Fix } else { Do-Undo }
+if ($Fix) { $rc = Do-Fix } elseif ($Cure) { $rc = Do-Cure } else { $rc = Do-Undo }
+exit $rc
