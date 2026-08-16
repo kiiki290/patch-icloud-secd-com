@@ -10,8 +10,8 @@
 # 两种修复：
 #   [急救] -Fix ：不重装，在真实注册表 HKLM\SOFTWARE\Classes\PackagedCom 下
 #           模拟"打包 COM 声明"（让 SCM 以打包身份激活 secd），立即恢复弹窗
-#   [治本] -Cure：还原 WindowsApps 标准 ACL + 引导用户重装 iCloud，
-#           实测重装后弹窗直接正常、无需补丁
+#   [治本] -Cure：还原 WindowsApps 标准 ACL——当场生效，无需重装/重启/补丁
+#           （VM 实测 2026-08-16）
 #
 # 用法（需要管理员权限；脚本不做自动提权，仅提示）：
 #   run_patch.bat                                  # 普通用户：双击启动器（自动提权 + 绕过执行策略）
@@ -154,10 +154,9 @@ function Test-PatchIntegrity([int]$serverId) {
     return ,$bad
 }
 
-# ---------- 治本修复：还原 WindowsApps 权限 + 引导重装 ----------
+# ---------- 治本修复：还原 WindowsApps 权限（当场生效，无需重装） ----------
 function Do-Cure {
-    Write-Host '== 治本修复：还原 WindowsApps 权限 + 重装 iCloud ==' -ForegroundColor White
-    Test-CrtVersion
+    Write-Host '== 治本修复：还原 WindowsApps 权限（无需重装，当场生效） ==' -ForegroundColor White
     $extra = Get-WindowsAppsAnomaly
     if ($extra.Count -eq 0) {
         Ok 'WindowsApps 权限已是标准 ACL，无需还原'
@@ -172,13 +171,10 @@ function Do-Cure {
         else { Warn "仍有非标准条目：$($after -join ', ')" }
     }
     Write-Host ''
-    Write-Host '下一步（需手动完成，顺序不能反）：' -ForegroundColor Cyan
-    Write-Host '  1. 卸载当前 iCloud（设置 > 应用 > iCloud > 卸载，或开始菜单右键卸载）'
-    Write-Host '  2. 从 Microsoft Store 重新安装 iCloud'
-    Write-Host '  3. 登录 Apple ID（两步验证）→ 开启"密码"功能'
-    Write-Host '  4. 重启 Edge → 点击扩展图标 → 验证码弹窗应直接出现（无需补丁）'
-    Write-Host '  ⚠️ 卸载会清空本地钥匙串，重装登录后自动从 iCloud 重新同步'
-    Write-Host '  ⚠️ 重装完成前不要再改 WindowsApps 权限（安装时刻的权限状态决定成败）'
+    Write-Host '✅ 治本修复完成。无需重装、无需重启计算机、无需补丁。' -ForegroundColor Green
+    Write-Host '  1. 重启 Edge（或直接）点击 iCloud Passwords 扩展图标'
+    Write-Host '  2. 验证码弹窗出现即生效；若仍不出现，再试急救修复 [-Fix] 或考虑重装'
+    Write-Host '  ⚠️ 以后不要再给 WindowsApps 添加用户权限（否则将来升级/重装会再次失效）'
 }
 
 # ---------- 急救修复：PackagedCom 模拟 ----------
@@ -372,7 +368,7 @@ if (-not $Undo -and -not $Fix) {
         Write-Host "  当前状态：$($st.Summary)" -ForegroundColor $(if ($st.ClassExists -and $st.State -eq 1) { 'Green' } else { 'Yellow' })
         Write-Host ''
         Write-Host '  [1] 急救修复（PackagedCom 补丁，不重装）'
-        Write-Host '  [2] 治本修复（还原 WindowsApps 权限 + 引导重装）'
+        Write-Host '  [2] 治本修复（还原 WindowsApps 权限，当场生效）'
         Write-Host '  [3] 撤销急救修复（回滚）'
         Write-Host '  [4] 查看详细状态'
         Write-Host '  [0] 退出'

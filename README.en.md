@@ -29,7 +29,7 @@ After clicking the iCloud Passwords extension icon in Edge/Chrome:
 2. But the **verification popup** (the small window with a 6-digit code, a `#32770` dialog) **never appears**
 3. After ~20–30 s the extension reports: *"Turn on Passwords in iCloud for Windows to use iCloud Passwords with Edge"*
 
-**Trigger condition** (confirmed by VM A/B experiments, 2026-08-15): installing/reinstalling iCloud **while the WindowsApps folder has elevated permissions** (a normal user granted Full Control) breaks it — no uninstall/reinstall needed, a first install with elevated permissions triggers it too; machines installed with standard permissions are unaffected.
+**Trigger condition** (confirmed by VM A/B experiments, 2026-08-15): installing/reinstalling iCloud **while the WindowsApps folder has elevated permissions** (a normal user granted Full Control) breaks it — no uninstall/reinstall needed, a first install with elevated permissions triggers it too; machines installed with standard permissions are unaffected. **The reverse also holds** (verified on VM, 2026-08-16): restoring the permissions takes effect immediately — no reinstall needed.
 
 ## Quick Start
 
@@ -66,7 +66,7 @@ After running, the script detects the current state and shows a menu (dual-mode)
   - `❌ Not fixed` — everything missing (typical state after reinstall)
   - Also shows WindowsApps permission anomalies and the MSVCP140 (VC++ runtime) version
 - **[1] First-aid fix** — writes PackagedCom packaged-COM declarations (no reinstall; popup works immediately)
-- **[2] Permanent fix** — restores WindowsApps ACL + guides reinstall (one-shot, no patch needed)
+- **[2] Permanent fix** — restores the WindowsApps ACL — **takes effect immediately, no reinstall/reboot/patch needed** (verified on VM)
 - **[3] Undo** — deletes the first-aid entries (State kept)
 - **[4] Show details** — read-only: package / Class / Server / TypeLib / Interface / State / permissions / CRT
 - **[0] Exit**
