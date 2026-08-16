@@ -69,9 +69,9 @@ pwsh -File patch_icloud_secd_com.ps1 -Undo  # 直接撤销
   - `⚠️ 部分修复` — 部分项存在（常见：只差 State 或 Class）
   - `❌ 未修复` — 全部缺失（重装后的典型状态）
   - 另显示 WindowsApps 权限是否异常、MSVCP140（VC++ 运行库）版本
-- **[1] 急救修复**：写入 PackagedCom 打包 COM 声明（不重装，立即恢复弹窗）
-- **[2] 治本修复**：还原 WindowsApps 权限——**当场生效，无需重装/重启/补丁**（VM 实测）
-- **[3] 撤销修复**：删除急救写入项（State 保留）
+- **[1] 补丁修复**：写入 PackagedCom 打包 COM 声明（不重装，立即恢复弹窗）
+- **[2] 权限修复**：还原 WindowsApps 权限——**当场生效，无需重装/重启/补丁**（VM 实测）
+- **[3] 撤销补丁**：删除补丁写入项（State 保留）
 - **[4] 查看详细状态**：只读展示 包/Class/Server/TypeLib/Interface/State/权限/CRT
 - **[0] 退出**
 

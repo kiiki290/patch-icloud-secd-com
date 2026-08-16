@@ -8,17 +8,17 @@
 #   不到）→ helper CoCreateInstance 0x80040154 → 弹窗不出现。
 #
 # 两种修复：
-#   [急救] -Fix ：不重装，在真实注册表 HKLM\SOFTWARE\Classes\PackagedCom 下
+#   [补丁] -Fix ：不重装，在真实注册表 HKLM\SOFTWARE\Classes\PackagedCom 下
 #           模拟"打包 COM 声明"（让 SCM 以打包身份激活 secd），立即恢复弹窗
-#   [治本] -Cure：还原 WindowsApps 标准 ACL——当场生效，无需重装/重启/补丁
+#   [权限] -Cure：还原 WindowsApps 标准 ACL——当场生效，无需重装/重启/补丁
 #           （VM 实测 2026-08-16）
 #
 # 用法（需要管理员权限；脚本不做自动提权，仅提示）：
 #   run_patch.bat                                  # 普通用户：双击启动器（自动提权 + 绕过执行策略）
 #   pwsh -File patch_icloud_secd_com.ps1           # 交互式菜单
-#   pwsh -File patch_icloud_secd_com.ps1 -Fix      # 急救修复
-#   pwsh -File patch_icloud_secd_com.ps1 -Cure     # 治本修复
-#   pwsh -File patch_icloud_secd_com.ps1 -Undo     # 撤销急救修复
+#   pwsh -File patch_icloud_secd_com.ps1 -Fix      # 补丁修复
+#   pwsh -File patch_icloud_secd_com.ps1 -Cure     # 权限修复
+#   pwsh -File patch_icloud_secd_com.ps1 -Undo     # 撤销补丁
 #   专业用户建议直接开管理员 PowerShell 运行；非管理员时脚本仅提示，需自行提权。
 #
 # 兼容：iCloud for Windows 15.9.60.0 实测通过（Windows 11 26100/26200，Edge）。
@@ -52,7 +52,7 @@ function Test-Admin {
     return $true
 }
 
-# ---------- WindowsApps 权限检测（治本修复的状态依据） ----------
+# ---------- WindowsApps 权限检测（权限修复的状态依据） ----------
 # 标准 ACL 的 8 个主体（SID 形式，与全新 VM 逐条核对过）
 $StdAclSids = @(
     'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464', # NT SERVICE\TrustedInstaller
@@ -104,11 +104,11 @@ function Get-PatchStatus {
     $interfaceOk = Test-Path "HKCU:\Software\Classes\Interface\{$iid}"
     $permAnomaly = Get-WindowsAppsAnomaly
     if ($serverId -ne $null -and $state -eq 1) {
-        $summary = '✅ 已修复（急救补丁生效）'
+        $summary = '✅ 已修复（补丁生效）'
     } elseif ($permAnomaly.Count -eq 0 -and $serverId -eq $null) {
         $summary = '✅ 权限正常（若弹窗失效，先试 -Cure 重装；若已装好则无需处理）'
     } elseif ($permAnomaly.Count -gt 0) {
-        $summary = "⚠️ WindowsApps 权限异常（$($permAnomaly -join ', ')）——弹窗失效的根因，建议治本修复 [-Cure]"
+        $summary = "⚠️ WindowsApps 权限异常（$($permAnomaly -join ', ')）——弹窗失效的根因，建议权限修复 [-Cure]"
     } elseif ($serverId -ne $null) {
         $summary = '⚠️ 部分（Class 已注册，State 未激活）'
     } else {
@@ -154,9 +154,9 @@ function Test-PatchIntegrity([int]$serverId) {
     return ,$bad
 }
 
-# ---------- 治本修复：还原 WindowsApps 权限（当场生效，无需重装） ----------
+# ---------- 权限修复：还原 WindowsApps 权限（当场生效，无需重装） ----------
 function Do-Cure {
-    Write-Host '== 治本修复：还原 WindowsApps 权限（无需重装，当场生效） ==' -ForegroundColor White
+    Write-Host '== 权限修复：还原 WindowsApps 权限（无需重装，当场生效） ==' -ForegroundColor White
     $extra = Get-WindowsAppsAnomaly
     if ($extra.Count -eq 0) {
         Ok 'WindowsApps 权限已是标准 ACL，无需还原'
@@ -171,15 +171,15 @@ function Do-Cure {
         else { Warn "仍有非标准条目：$($after -join ', ')" }
     }
     Write-Host ''
-    Write-Host '✅ 治本修复完成。无需重装、无需重启计算机、无需补丁。' -ForegroundColor Green
+    Write-Host '✅ 权限修复完成。无需重装、无需重启计算机、无需补丁。' -ForegroundColor Green
     Write-Host '  1. 重启 Edge（或直接）点击 iCloud Passwords 扩展图标'
-    Write-Host '  2. 验证码弹窗出现即生效；若仍不出现，再试急救修复 [-Fix] 或考虑重装'
+    Write-Host '  2. 验证码弹窗出现即生效；若仍不出现，再试补丁修复 [-Fix] 或考虑重装'
     Write-Host '  ⚠️ 以后不要再给 WindowsApps 添加用户权限（否则将来升级/重装会再次失效）'
 }
 
-# ---------- 急救修复：PackagedCom 模拟 ----------
+# ---------- 补丁修复：PackagedCom 模拟 ----------
 function Do-Fix {
-    Write-Host '== 急救修复：写入 PackagedCom 打包 COM 声明（不重装） ==' -ForegroundColor White
+    Write-Host '== 补丁修复：写入 PackagedCom 打包 COM 声明（不重装） ==' -ForegroundColor White
     Test-CrtVersion
     $appx = Get-ICloudPackage
     if (-not $appx) { Warn '未检测到 AppleInc.iCloud 包，请先安装 iCloud for Windows。'; return 1 }
@@ -367,9 +367,9 @@ if (-not $Undo -and -not $Fix) {
         Write-Host ''
         Write-Host "  当前状态：$($st.Summary)" -ForegroundColor $(if ($st.ClassExists -and $st.State -eq 1) { 'Green' } else { 'Yellow' })
         Write-Host ''
-        Write-Host '  [1] 急救修复（PackagedCom 补丁，不重装）'
-        Write-Host '  [2] 治本修复（还原 WindowsApps 权限，当场生效）'
-        Write-Host '  [3] 撤销急救修复（回滚）'
+        Write-Host '  [1] 补丁修复（PackagedCom 补丁，不重装）'
+        Write-Host '  [2] 权限修复（还原 WindowsApps 权限，当场生效）'
+        Write-Host '  [3] 撤销补丁（回滚）'
         Write-Host '  [4] 查看详细状态'
         Write-Host '  [0] 退出'
         Write-Host ''

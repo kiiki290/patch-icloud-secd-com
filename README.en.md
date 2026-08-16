@@ -65,9 +65,9 @@ After running, the script detects the current state and shows a menu (dual-mode)
   - `⚠️ Partially fixed` — some items present (commonly missing only State or Class)
   - `❌ Not fixed` — everything missing (typical state after reinstall)
   - Also shows WindowsApps permission anomalies and the MSVCP140 (VC++ runtime) version
-- **[1] First-aid fix** — writes PackagedCom packaged-COM declarations (no reinstall; popup works immediately)
-- **[2] Permanent fix** — restores the WindowsApps ACL — **takes effect immediately, no reinstall/reboot/patch needed** (verified on VM)
-- **[3] Undo** — deletes the first-aid entries (State kept)
+- **[1] Patch fix** — writes PackagedCom packaged-COM declarations (no reinstall; popup works immediately)
+- **[2] Permission fix** — restores the WindowsApps ACL — **takes effect immediately, no reinstall/reboot/patch needed** (verified on VM)
+- **[3] Undo patch** — deletes the patch entries (State kept)
 - **[4] Show details** — read-only: package / Class / Server / TypeLib / Interface / State / permissions / CRT
 - **[0] Exit**
 
