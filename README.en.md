@@ -29,7 +29,7 @@ After clicking the iCloud Passwords extension icon in Edge/Chrome:
 2. But the **verification popup** (the small window with a 6-digit code, a `#32770` dialog) **never appears**
 3. After ~20–30 s the extension reports: *"Turn on Passwords in iCloud for Windows to use iCloud Passwords with Edge"*
 
-**Trigger condition** (confirmed by VM A/B experiments, 2026-08-15): installing/reinstalling iCloud **while the WindowsApps folder has elevated permissions** (a normal user granted Full Control) breaks it — no uninstall/reinstall needed, a first install with elevated permissions triggers it too; machines installed with standard permissions are unaffected. **The reverse also holds** (verified on VM, 2026-08-16): restoring the permissions takes effect immediately — no reinstall needed.
+**Trigger condition** (confirmed by VM A/B experiments): installing/reinstalling iCloud **while the WindowsApps folder has elevated permissions** (a normal user granted Full Control) breaks it — no uninstall/reinstall needed, a first install with elevated permissions triggers it too; machines installed with standard permissions are unaffected. **The reverse also holds** (verified on VM): restoring the permissions takes effect immediately — no reinstall needed.
 
 ## Quick Start
 
@@ -115,15 +115,15 @@ The registry of an MSIX packaged app (and its COM servers) is **virtualized**: p
 
 secd's registration is written by an iCloud runtime flow (secd embeds an ATL `.rgs` script: `CLSID\{CE6AF8E5}='SecDaemon Class'` + `LocalServer32='%MODULE%'` + `TypeLib={71529314-...}`) and runs **only on first install**.
 
-### 3. The real root cause: elevated WindowsApps at install time → the packaged-registration mount silently fails (corrected 2026-08-15)
+### 3. The real root cause: elevated WindowsApps at install time → the packaged-registration mount silently fails
 
 **Uninstall/reinstall itself does not break anything** (VM A/B: reinstall with standard permissions → popup works); **installing while WindowsApps permissions are elevated** breaks it immediately (a first install triggers it too — no reinstall needed).
 
-Mechanism: with elevated permissions, secd's runtime self-registration lands in the package's `Registry.dat` (App-V style registry-file virtualization; evidence: the broken state's Registry.dat contains the full SecDaemon Class + ISecDaemon marshal + TypeLib registration), but **RPCSS cannot resolve that registration from COMROOT** → helper CoCreateInstance 0x80040154 (CLASSNOTREG) → replies {"cmd":10} → popup never appears.
+Mechanism: secd's registration lives in the package's `Registry.dat` (a package-payload registry baseline — identical content in both the healthy and broken states, both containing the full SecDaemon Class + ISecDaemon marshal + TypeLib registration). The real difference is whether the system **mounts that registration as RPCSS-resolvable packaged-COM view** (`\REGISTRY\COMROOT`): the mount step checks WindowsApps ACL integrity first — with elevated permissions the check fails and the mount is **silently skipped** (COMROOT absent → 0xC0000034, not denied) → helper CoCreateInstance 0x80040154 (CLASSNOTREG) → replies {"cmd":10} → popup never appears. **Restoring the standard ACL makes the mount succeed on the next resolution — effective immediately, no reinstall/reboot needed, and the fix persists** (re-elevating or rebooting afterwards does not affect it).
 
 **Comparison evidence**: on a machine installed with standard permissions, RPCSS opens the CLSID from the isolated view (confirmed via ETW); on the broken machine every path fails to resolve. The healthy machine's real registry (HKCR, PackagedCom, HKCU Classes) also lacks this registration — it exists only in the isolated view.
 
-> Note: earlier hypotheses — the `p222-contactsws.icloud.com` DNS decommission (account-init slowness for China-region accounts) and "registration lost after reinstall" — were disproven/corrected: p222 only explains slow app startup, not the missing popup; "lost registration" is actually a failed mount (see the archive README for the full history).
+> Note: the `p222-contactsws.icloud.com` DNS decommission only explains slow app startup (~30 s for China-region accounts), not the missing popup; "registration lost after reinstall" is actually a failed mount (see the mechanism section above).
 
 ---
 
@@ -162,7 +162,7 @@ The helper and secd communicate cross-process via COM. Marshaling ISecDaemon rel
 
 ### Prerequisite: VC++ runtime (MSVCP140 ≥ 14.4x)
 
-VM cross-experiments (2026-08-16): when the System32 MSVCP140 (VC++ 2015-2022 Redistributable) is **below 14.40**, the helper crashes in the `securityd_connection` mutex path (0xC0000005, NULL dereference in `_Mtx_do_lock`) before the patch can take effect. The script detects this and warns to install the latest [VC++ 2015-2022 Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) (on Win11, a Windows Update may be needed since System32's copy is an OS component).
+VM cross-experiments: when the System32 MSVCP140 (VC++ 2015-2022 Redistributable) is **below 14.40**, the helper crashes while processing the verification-code message (0xC0000005, NULL dereference in `_Mtx_do_lock`, before COM activation) — the patch never gets a chance to take effect. The script detects this and warns to install the latest [VC++ 2015-2022 Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) (on Win11, a Windows Update may be needed since System32's copy is an OS component).
 
 ### Why CKKS Passwords State = 1
 
@@ -204,7 +204,7 @@ The iCloud Passwords feature-enable switch. On normally installed machines the a
 
 ## Script Design
 
-- **Elevation strategy** (since 2026-08-16): the script **does not self-elevate** — regular users double-click `run_patch.bat` (the launcher handles UAC elevation + `-ExecutionPolicy Bypass`), power users open an admin PowerShell; running the script without admin rights only prints a hint and exits, so the launcher never triggers a second UAC prompt.
+- **Elevation strategy**: the script **does not self-elevate** — regular users double-click `run_patch.bat` (the launcher handles UAC elevation + `-ExecutionPolicy Bypass`), power users open an admin PowerShell; running the script without admin rights only prints a hint and exits, so the launcher never triggers a second UAC prompt.
 - **PS 5.1 compatible**: `#requires -Version 5.1` + **UTF-8 with BOM** (5.1 reads BOM-less files as ANSI, which garbles Chinese text — a known pitfall).
 - **Dynamic values**: package name (`Get-AppxPackage`), ServerId (max existing + 1, or reuse if already registered), DeploymentVersion (read from existing Class entries), secd.exe path (from `InstallLocation`).
 - **Interactive menu**: live status detection (Class registered / State / marshal keys complete), with Fix / Undo / detailed status / exit; `-Fix` / `-Undo` switches for scripted use.

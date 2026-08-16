@@ -2,14 +2,15 @@
 # ============================================================
 # iCloud Passwords 验证码弹窗修复工具（交互式，双模式）
 #
-# 背景：iCloud Passwords 扩展验证码弹窗失效的根因（2026-08-15 实锤）：
+# 背景：iCloud Passwords 扩展验证码弹窗失效的根因：
 #   在 WindowsApps 权限已被提权（普通用户获得完全控制）的状态下安装 iCloud，
-#   secd 的 COM 注册挂载机制静默失效（注册写进包内 Registry.dat 但 RPCSS 解析
-#   不到）→ helper CoCreateInstance 0x80040154 → 弹窗不出现。
+#   secd 的 COM 注册挂载机制静默失效（两态注册都在包内 Registry.dat——包内置基线、
+#   内容等价；提权状态下系统的 COM 视图挂载工序被静默跳过，RPCSS 解析不到）
+#   → helper CoCreateInstance 0x80040154 → 弹窗不出现。
 #
 # 两种修复：
 #   [权限] -Cure：还原 WindowsApps 标准 ACL——当场生效，无需重装/重启/补丁
-#           （VM 实测 2026-08-16）
+#           （VM 实测验证）
 #   [补丁] -Fix ：不重装，在真实注册表 HKLM\SOFTWARE\Classes\PackagedCom 下
 #           模拟"打包 COM 声明"（让 SCM 以打包身份激活 secd），立即恢复弹窗
 #
@@ -64,21 +65,19 @@ $StdAclSids = @(
     'S-1-5-12',  # NT AUTHORITY\RESTRICTED
     'S-1-5-32-545' # BUILTIN\Users
 )
-function Resolve-Sid([string]$Principal) {
-    if ($Principal -match '^S-1-') { return $Principal }
-    try { return ([System.Security.Principal.NTAccount]::new($Principal)).Translate([System.Security.Principal.SecurityIdentifier]).Value }
-    catch { return $Principal }
-}
 # 返回 WindowsApps 根 ACL 中非标准主体的列表（空 = 标准）
+# 用 Get-Acl 结构化解析（icacls 文本解析在「路径+ACE 首行混排」时可能漏报首个 ACE）
 function Get-WindowsAppsAnomaly {
-    $lines = icacls 'C:\Program Files\WindowsApps' 2>&1
     $extra = @()
-    foreach ($line in $lines) {
-        if ($line -match '^[^:]+:\(') {
-            $p = ($line -split ':')[0].Trim()
-            if ($p -and (Resolve-Sid $p) -notin $StdAclSids) { $extra += $p }
+    try {
+        $acl = Get-Acl 'C:\Program Files\WindowsApps' -ErrorAction Stop
+        foreach ($ace in $acl.Access) {
+            if ($ace.IsInherited) { continue }   # 只统计显式 ACE（标准 ACL 的 8 条均为显式）
+            try { $sid = $ace.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }
+            catch { $sid = $ace.IdentityReference.Value }   # 解析失败按 SID 字符串比对
+            if ($sid -notin $StdAclSids) { $extra += $ace.IdentityReference.Value }
         }
-    }
+    } catch { return ,@() }   # 读取失败按无异常处理，不阻塞流程
     return ,$extra
 }
 
@@ -166,21 +165,29 @@ function Do-Cure {
     $extra = Get-WindowsAppsAnomaly
     if ($extra.Count -eq 0) {
         Ok 'WindowsApps 权限已是标准 ACL，无需还原'
+        $after = @()
     } else {
         Write-Host "发现非标准权限条目：$($extra -join ', ')" -ForegroundColor Yellow
         foreach ($p in $extra) {
-            icacls 'C:\Program Files\WindowsApps' /remove "$p" | Out-Null
-            Write-Host "  已移除: $p"
+            icacls 'C:\Program Files\WindowsApps' /remove "$p" 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 0) { Ok "已移除: $p" }
+            else { Warn "移除失败: $p（退出码 $LASTEXITCODE，可能为继承 ACE 或名称无法解析）" }
         }
         $after = Get-WindowsAppsAnomaly
         if ($after.Count -eq 0) { Ok 'WindowsApps 权限已还原为标准 ACL' }
         else { Warn "仍有非标准条目：$($after -join ', ')" }
     }
     Write-Host ''
-    Write-Host '✅ 权限修复完成。无需重装、无需重启计算机、无需补丁。' -ForegroundColor Green
-    Write-Host '  1. 重启 Edge（或直接）点击 iCloud Passwords 扩展图标'
-    Write-Host '  2. 验证码弹窗出现即生效；若仍不出现，再试补丁修复 [-Fix] 或考虑重装'
-    Write-Host '  ⚠️ 以后不要再给 WindowsApps 添加用户权限（否则将来升级/重装会再次失效）'
+    if ($after.Count -eq 0) {
+        Write-Host '✅ 权限修复完成。无需重装、无需重启计算机、无需补丁。' -ForegroundColor Green
+        Write-Host '  1. 重启 Edge（或直接）点击 iCloud Passwords 扩展图标'
+        Write-Host '  2. 验证码弹窗出现即生效；若仍不出现，再试补丁修复 [-Fix] 或考虑重装'
+        Write-Host '  ⚠️ 以后不要再给 WindowsApps 添加用户权限（否则将来升级/重装会再次失效）'
+        return 0
+    } else {
+        Write-Host '⚠️ 权限修复未完全生效——请检查上方未移除的条目（可能是继承 ACE 或需在安全属性界面手动移除）。' -ForegroundColor Yellow
+        return 1
+    }
 }
 
 # ---------- 补丁修复：PackagedCom 模拟 ----------
@@ -307,9 +314,17 @@ function Do-Fix {
     }
 
     Write-Host ''
-    Write-Host '✅ 修复完成。下一步：' -ForegroundColor Green
-    Write-Host '  1. 完全关闭 Edge（所有窗口）再重新打开'
-    Write-Host '  2. 点击 iCloud Passwords 扩展图标，输入验证码'
+    if (Test-CrtOk) {
+        Write-Host '✅ 修复完成。下一步：' -ForegroundColor Green
+        Write-Host '  1. 完全关闭 Edge（所有窗口）再重新打开'
+        Write-Host '  2. 点击 iCloud Passwords 扩展图标，输入验证码'
+    } else {
+        Write-Host '⚠️ 补丁已写入，但 MSVCP140 版本过低，当前状态下补丁可能无法生效。' -ForegroundColor Yellow
+        Write-Host '  请安装最新 VC++ 2015-2022 Redistributable 后重新运行本工具：' -ForegroundColor Yellow
+        Write-Host '  https://aka.ms/vs/17/release/vc_redist.x64.exe' -ForegroundColor Yellow
+        Write-Host '  （Win11 系统组件场景可先做 Windows 更新）' -ForegroundColor Yellow
+        Write-Host '  升级完成后：1. 完全关闭 Edge 再重新打开；2. 点击扩展图标输入验证码' -ForegroundColor Yellow
+    }
     return 0
 }
 
@@ -340,9 +355,10 @@ function Do-Undo {
     }
     foreach ($t in $targets) {
         if (-not (Test-Path $t)) { continue }
-        # 误删保护：HKCR/HKCU 的 TypeLib/Interface 键只在 (default) 值是我们写的
-        # 时才删——补丁前已存在的同 GUID 注册（正常安装态）不能动
-        if ($t -match '\\TypeLib\\' -or $t -match '\\Interface\\') {
+        # 误删保护：仅对真实注册（HKCU/HKLM Software\Classes 下）的 TypeLib/Interface 键，
+        # 在 (default) 值确认是本工具写入时才删——补丁前已存在的同 GUID 注册（正常安装态）
+        # 不能动；PackagedCom 下的是本工具专属命名空间（模拟物化），直接删
+        if ($t -notmatch '\\PackagedCom\\' -and ($t -match '\\TypeLib\\' -or $t -match '\\Interface\\')) {
             $def = (Get-ItemProperty $t -Name '(default)' -ErrorAction SilentlyContinue).'(default)'
             $expect = if ($t -match '\\TypeLib\\') { 'SecDaemon 1.0 Type Library' } else { 'ISecDaemon' }
             if ($def -ne $expect) {
@@ -411,7 +427,7 @@ if (-not $Undo -and -not $Fix) {
             '4' {
                 Write-Host ''
                 Write-Host '  --- 详细状态 ---'
-                $appx = Get-AppxPackage AppleInc.iCloud -ErrorAction SilentlyContinue
+                $appx = Get-ICloudPackage
                 if (-not $appx) { Write-Host '  iCloud 包：未安装' -ForegroundColor Red }
                 else {
                     Write-Host "  iCloud 包：$($appx.PackageFullName)"
