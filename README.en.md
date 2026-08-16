@@ -37,8 +37,9 @@ After clicking the iCloud Passwords extension icon in Edge/Chrome:
 # Regular users: double-click run_patch.bat (it requests admin rights via UAC)
 # Power users: open "Terminal (Admin)" / "Windows PowerShell (Admin)", then:
 pwsh -File patch_icloud_secd_com.ps1        # interactive menu (recommended)
-pwsh -File patch_icloud_secd_com.ps1 -Fix   # fix directly
-pwsh -File patch_icloud_secd_com.ps1 -Undo  # undo directly
+pwsh -File patch_icloud_secd_com.ps1 -Cure  # permission fix
+pwsh -File patch_icloud_secd_com.ps1 -Fix   # patch fix
+pwsh -File patch_icloud_secd_com.ps1 -Undo  # undo patch
 ```
 
 Right-click → "Run with PowerShell" also works (the script is compatible with both PS 5.1 and PS 7). **The script does not self-elevate**: when run without admin rights it only prints a hint — use run_patch.bat or an elevated PowerShell instead.
@@ -51,8 +52,9 @@ Right-click → "Run with PowerShell" also works (the script is compatible with 
 |---|---|
 | Double-click launcher (recommended, auto-elevates + bypasses policy) | `run_patch.bat` |
 | Interactive menu (admin required) | `pwsh -File patch_icloud_secd_com.ps1` |
-| Fix directly (admin required) | `pwsh -File patch_icloud_secd_com.ps1 -Fix` |
-| Undo directly (admin required) | `pwsh -File patch_icloud_secd_com.ps1 -Undo` |
+| Permission fix (admin required, takes effect immediately) | `pwsh -File patch_icloud_secd_com.ps1 -Cure` |
+| Patch fix (admin required) | `pwsh -File patch_icloud_secd_com.ps1 -Fix` |
+| Undo patch (admin required) | `pwsh -File patch_icloud_secd_com.ps1 -Undo` |
 
 ### Interactive menu
 
@@ -65,8 +67,8 @@ After running, the script detects the current state and shows a menu (dual-mode)
   - `⚠️ Partially fixed` — some items present (commonly missing only State or Class)
   - `❌ Not fixed` — everything missing (typical state after reinstall)
   - Also shows WindowsApps permission anomalies and the MSVCP140 (VC++ runtime) version
-- **[1] Patch fix** — writes PackagedCom packaged-COM declarations (no reinstall; popup works immediately)
-- **[2] Permission fix** — restores the WindowsApps ACL — **takes effect immediately, no reinstall/reboot/patch needed** (verified on VM)
+- **[1] Permission fix** — restores the WindowsApps ACL — **takes effect immediately, no reinstall/reboot/patch needed** (verified on VM)
+- **[2] Patch fix** — writes PackagedCom packaged-COM declarations (no reinstall; popup works immediately)
 - **[3] Undo patch** — deletes the patch entries (State kept)
 - **[4] Show details** — read-only: package / Class / Server / TypeLib / Interface / State / permissions / CRT
 - **[0] Exit**

@@ -40,8 +40,9 @@
 # 普通用户：直接双击 run_patch.bat（自动请求管理员权限）
 # 专业用户：右键"终端(管理员)"或"Windows PowerShell(管理员)"打开后：
 pwsh -File patch_icloud_secd_com.ps1        # 交互式菜单（推荐）
-pwsh -File patch_icloud_secd_com.ps1 -Fix   # 直接修复
-pwsh -File patch_icloud_secd_com.ps1 -Undo  # 直接撤销
+pwsh -File patch_icloud_secd_com.ps1 -Cure  # 权限修复
+pwsh -File patch_icloud_secd_com.ps1 -Fix   # 补丁修复
+pwsh -File patch_icloud_secd_com.ps1 -Undo  # 撤销补丁
 ```
 
 右键"使用 PowerShell 运行"也可（脚本兼容 PS 5.1 与 PS 7）。**脚本不做自动提权**：
@@ -55,8 +56,9 @@ pwsh -File patch_icloud_secd_com.ps1 -Undo  # 直接撤销
 |---|---|
 | 双击启动器（推荐，自动提权 + 绕过执行策略） | `run_patch.bat` |
 | 交互式菜单（需管理员） | `pwsh -File patch_icloud_secd_com.ps1` |
-| 直接修复（需管理员） | `pwsh -File patch_icloud_secd_com.ps1 -Fix` |
-| 直接撤销（需管理员） | `pwsh -File patch_icloud_secd_com.ps1 -Undo` |
+| 权限修复（需管理员，当场生效） | `pwsh -File patch_icloud_secd_com.ps1 -Cure` |
+| 补丁修复（需管理员） | `pwsh -File patch_icloud_secd_com.ps1 -Fix` |
+| 撤销补丁（需管理员） | `pwsh -File patch_icloud_secd_com.ps1 -Undo` |
 
 ### 交互菜单
 
@@ -69,8 +71,8 @@ pwsh -File patch_icloud_secd_com.ps1 -Undo  # 直接撤销
   - `⚠️ 部分修复` — 部分项存在（常见：只差 State 或 Class）
   - `❌ 未修复` — 全部缺失（重装后的典型状态）
   - 另显示 WindowsApps 权限是否异常、MSVCP140（VC++ 运行库）版本
-- **[1] 补丁修复**：写入 PackagedCom 打包 COM 声明（不重装，立即恢复弹窗）
-- **[2] 权限修复**：还原 WindowsApps 权限——**当场生效，无需重装/重启/补丁**（VM 实测）
+- **[1] 权限修复**：还原 WindowsApps 权限——**当场生效，无需重装/重启/补丁**（VM 实测）
+- **[2] 补丁修复**：写入 PackagedCom 打包 COM 声明（不重装，立即恢复弹窗）
 - **[3] 撤销补丁**：删除补丁写入项（State 保留）
 - **[4] 查看详细状态**：只读展示 包/Class/Server/TypeLib/Interface/State/权限/CRT
 - **[0] 退出**

@@ -8,16 +8,16 @@
 #   不到）→ helper CoCreateInstance 0x80040154 → 弹窗不出现。
 #
 # 两种修复：
-#   [补丁] -Fix ：不重装，在真实注册表 HKLM\SOFTWARE\Classes\PackagedCom 下
-#           模拟"打包 COM 声明"（让 SCM 以打包身份激活 secd），立即恢复弹窗
 #   [权限] -Cure：还原 WindowsApps 标准 ACL——当场生效，无需重装/重启/补丁
 #           （VM 实测 2026-08-16）
+#   [补丁] -Fix ：不重装，在真实注册表 HKLM\SOFTWARE\Classes\PackagedCom 下
+#           模拟"打包 COM 声明"（让 SCM 以打包身份激活 secd），立即恢复弹窗
 #
 # 用法（需要管理员权限；脚本不做自动提权，仅提示）：
 #   run_patch.bat                                  # 普通用户：双击启动器（自动提权 + 绕过执行策略）
 #   pwsh -File patch_icloud_secd_com.ps1           # 交互式菜单
-#   pwsh -File patch_icloud_secd_com.ps1 -Fix      # 补丁修复
 #   pwsh -File patch_icloud_secd_com.ps1 -Cure     # 权限修复
+#   pwsh -File patch_icloud_secd_com.ps1 -Fix      # 补丁修复
 #   pwsh -File patch_icloud_secd_com.ps1 -Undo     # 撤销补丁
 #   专业用户建议直接开管理员 PowerShell 运行；非管理员时脚本仅提示，需自行提权。
 #
@@ -106,9 +106,9 @@ function Get-PatchStatus {
     if ($serverId -ne $null -and $state -eq 1) {
         $summary = '✅ 已修复（补丁生效）'
     } elseif ($permAnomaly.Count -eq 0 -and $serverId -eq $null) {
-        $summary = '✅ 权限正常（若弹窗失效，先试 -Cure 重装；若已装好则无需处理）'
+        $summary = '✅ WindowsApps文件夹权限正常，无需处理（若弹窗仍然失效，可试试 [2] 补丁修复）'
     } elseif ($permAnomaly.Count -gt 0) {
-        $summary = "⚠️ WindowsApps 权限异常（$($permAnomaly -join ', ')）——弹窗失效的根因，建议权限修复 [-Cure]"
+        $summary = "⚠️ WindowsApps文件夹权限异常（$($permAnomaly -join ', ')）——弹窗失效的根因，建议使用 [1] 权限修复 [-Cure]"
     } elseif ($serverId -ne $null) {
         $summary = '⚠️ 部分（Class 已注册，State 未激活）'
     } else {
@@ -118,18 +118,24 @@ function Get-PatchStatus {
 }
 
 # ---------- CRT 版本检测（旧版 MSVCP140 已知 bug：helper 连接 secd 时崩溃） ----------
-function Test-CrtVersion {
+# 返回 CRT 是否满足要求（≥14.40；读取失败时按满足处理，不阻塞流程）
+function Test-CrtOk {
     $dll = Get-Item 'C:\Windows\System32\MSVCP140.dll' -ErrorAction SilentlyContinue
-    if (-not $dll) { return }
-    $v = $dll.VersionInfo.FileVersion
-    try { $ver = [version]$v } catch { return }
-    if ($ver.Major -eq 14 -and $ver.Minor -lt 40) {
-        Warn "检测到旧版 VC++ 运行库 MSVCP140.dll $v"
+    if (-not $dll) { return $true }
+    try { $ver = [version]$dll.VersionInfo.FileVersion } catch { return $true }
+    return -not ($ver.Major -eq 14 -and $ver.Minor -lt 40)
+}
+function Get-CrtVersion {
+    return (Get-Item 'C:\Windows\System32\MSVCP140.dll' -ErrorAction SilentlyContinue).VersionInfo.FileVersion
+}
+function Test-CrtVersion {
+    if (Test-CrtOk) {
+        Ok "MSVCP140.dll $(Get-CrtVersion)（CRT 正常）"
+    } else {
+        Warn "检测到旧版 VC++ 运行库 MSVCP140.dll $(Get-CrtVersion)"
         Warn '  14.3x 及更早有已知 bug：helper 在连接 secd 时崩溃（0xC0000005），补丁将无法生效。'
         Warn '  请先安装最新 VC++ 2015-2022 Redistributable：https://aka.ms/vs/17/release/vc_redist.x64.exe'
         Warn '  （Win11 系统组件场景可先做 Windows 更新；升级后重新运行本工具）'
-    } else {
-        Ok "MSVCP140.dll $v（CRT 正常）"
     }
 }
 
@@ -365,10 +371,22 @@ if (-not $Undo -and -not $Fix) {
         Write-Host '============================================' -ForegroundColor Cyan
         $st = Get-PatchStatus
         Write-Host ''
-        Write-Host "  当前状态：$($st.Summary)" -ForegroundColor $(if ($st.ClassExists -and $st.State -eq 1) { 'Green' } else { 'Yellow' })
+        # 当前状态行颜色：
+        #   「已修复（补丁生效）」段 → 按 CRT 版本判定（<14.40 标红 + 提示，达标绿）
+        #   其余段 → 按权限状态判定（权限异常红，正常绿）
+        $isFixed = $st.Summary -like '*已修复（补丁生效）*'
+        if ($isFixed) {
+            if (Test-CrtOk) {
+                Write-Host "  当前状态：$($st.Summary)" -ForegroundColor Green
+            } else {
+                Write-Host "  当前状态：$($st.Summary)（MSVCP140 $(Get-CrtVersion) 版本过低，补丁可能无法生效——请升级 VC++ 运行库）" -ForegroundColor Red
+            }
+        } else {
+            Write-Host "  当前状态：$($st.Summary)" -ForegroundColor $(if ($st.PermAnomaly.Count -gt 0) { 'Red' } else { 'Green' })
+        }
         Write-Host ''
-        Write-Host '  [1] 补丁修复（PackagedCom 补丁，不重装）'
-        Write-Host '  [2] 权限修复（还原 WindowsApps 权限，当场生效）'
+        Write-Host '  [1] 权限修复（还原 WindowsApps 权限，当场生效）'
+        Write-Host '  [2] 补丁修复（PackagedCom 补丁，不重装）'
         Write-Host '  [3] 撤销补丁（回滚）'
         Write-Host '  [4] 查看详细状态'
         Write-Host '  [0] 退出'
@@ -377,12 +395,12 @@ if (-not $Undo -and -not $Fix) {
         switch ($choice) {
             '1' {
                 Write-Host ''
-                if (Test-Admin) { Do-Fix }
+                if (Test-Admin) { Do-Cure }
                 Write-Host ''; $null = Read-Host '按回车返回菜单'
             }
             '2' {
                 Write-Host ''
-                if (Test-Admin) { Do-Cure }
+                if (Test-Admin) { Do-Fix }
                 Write-Host ''; $null = Read-Host '按回车返回菜单'
             }
             '3' {
