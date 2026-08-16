@@ -49,13 +49,16 @@ pwsh -File patch_icloud_secd_com.ps1 -Undo  # 撤销补丁
 右键"使用 PowerShell 运行"也可（脚本兼容 PS 5.1 与 PS 7）。**脚本不做自动提权**：
 非管理员运行仅提示，需自行用 run_patch.bat 或以管理员方式打开。
 
+**界面语言自动跟随系统**（中文系统显示中文，其他语言显示英文）；
+可用 `-Lang zh` / `-Lang en` 强制指定（`run_patch.bat zh` / `run_patch.bat en` 同理）。
+
 ## 工具使用方法
 
 ### 运行方式
 
 | 方式 | 命令 |
 |---|---|
-| 双击启动器（推荐，自动提权 + 绕过执行策略） | `run_patch.bat` |
+| 双击启动器（推荐，自动提权 + 绕过执行策略；固定使用系统自带 PowerShell 5.1） | `run_patch.bat` |
 | 交互式菜单（需管理员） | `pwsh -File patch_icloud_secd_com.ps1` |
 | 权限修复（需管理员，当场生效） | `pwsh -File patch_icloud_secd_com.ps1 -Cure` |
 | 补丁修复（需管理员） | `pwsh -File patch_icloud_secd_com.ps1 -Fix` |
@@ -76,6 +79,7 @@ pwsh -File patch_icloud_secd_com.ps1 -Undo  # 撤销补丁
 - **[2] 补丁修复**：写入 PackagedCom 打包 COM 声明（不重装，立即恢复弹窗）
 - **[3] 撤销补丁**：删除补丁写入项（State 保留）
 - **[4] 查看详细状态**：只读展示 包/Class/Server/TypeLib/Interface/State/权限/CRT
+- **[5] 切换语言**：中英文界面即时切换（仅当前会话，下次启动仍按系统语言自动检测）
 - **[0] 退出**
 
 **修复方式选择**：绝大多数情况（WindowsApps 权限曾被提权过）直接用 **[1] 权限修复** 即可**当场生效**；
@@ -248,6 +252,8 @@ iCloud「密码」功能的启用状态开关。正常安装的机器上应用�
 
 ## 脚本设计细节
 
+- **多语言**：界面文字自动跟随系统语言（`Get-UICulture`），`-Lang zh|en` 可强制；
+  `run_patch.bat zh|en` 启动器同参数。注册表写入值保持英文常量（Undo 误删保护的回读依据）
 - **5.1 兼容**：`#requires -Version 5.1` + **UTF-8 带 BOM**（5.1 按 ANSI 读
   无 BOM 的含中文脚本会解析错乱——踩过的坑）
 - **动态取值**：包名（`Get-AppxPackage`）、ServerId（现有最大 +1，已注册则复用）、

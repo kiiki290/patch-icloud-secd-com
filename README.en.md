@@ -1,22 +1,23 @@
-# iCloud Passwords Verification Popup Fix
+# iCloud Passwords Verification Code Popup Fix Tool
 
-> [简体中文](README.md) | English
+> [English](README.en.md) | 简体中文
 
-Fixes the "verification code popup never appears" issue with the iCloud Passwords browser extension on Windows.
-No Apple files are modified — this tool either restores the WindowsApps folder permissions or patches the registry (two fix modes). One-click **Fix / Undo / Status** modes.
+Fixes the issue where the verification code popup does not appear in the iCloud Passwords browser extension for Windows.
+No Apple files need to be modified. This tool only restores WindowsApps folder permissions or adds the missing registry entries (two repair methods).
+Supports one-click repair / undo / status check.
 
-## Contents
+## Table of Contents
 
 - [Symptoms](#symptoms)
 - [Quick Start](#quick-start)
-- [Usage Guide](#usage-guide)
+- [How to Use](#how-to-use)
 - [Root Cause](#root-cause)
 - [How the Fix Works](#how-the-fix-works)
 - [Registry Changes](#registry-changes)
-- [Script Design](#script-design)
-- [Compatibility & Limitations](#compatibility--limitations)
+- [Script Design Details](#script-design-details)
+- [Compatibility and Limitations](#compatibility-and-limitations)
 - [Known Issues](#known-issues)
-- [Verifying the Fix](#verifying-the-fix)
+- [How to Verify the Fix](#how-to-verify-the-fix)
 - [License](#license)
 
 ---
@@ -25,229 +26,277 @@ No Apple files are modified — this tool either restores the WindowsApps folder
 
 After clicking the iCloud Passwords extension icon in Edge/Chrome:
 
-1. The extension shows the verification code input UI ("iCloud sent a notification with a verification code to your devices")
-2. But the **verification popup** (the small window with a 6-digit code, a `#32770` dialog) **never appears**
-3. After ~20–30 s the extension reports: *"Turn on Passwords in iCloud for Windows to use iCloud Passwords with Edge"*
+1. The extension shows the verification code input interface ("iCloud has sent you a notification containing a verification code").
+2. However, the **verification code popup** (a small window displaying a 6-digit number, a `#32770` dialog) **never appears**.
+3. After about 20–30 seconds, the extension reports: `"Enable "Passwords" in iCloud for Windows to use iCloud Passwords with Edge"`.
 
-**Trigger condition** (confirmed by VM A/B experiments): installing/reinstalling iCloud **while the WindowsApps folder has elevated permissions** (a normal user granted Full Control) breaks it — no uninstall/reinstall needed, a first install with elevated permissions triggers it too; machines installed with standard permissions are unaffected. **The reverse also holds** (verified on VM): restoring the permissions takes effect immediately — no reinstall needed.
+**Trigger condition**: iCloud will fail if it is installed/reinstalled while the **WindowsApps folder permissions have been elevated** (a normal user has been granted Full Control). You do not need to uninstall and reinstall; the first installation while permissions are elevated triggers the issue as well.
+Machines with normal permissions are unaffected. **The reverse is also true**: restoring the original permissions takes effect immediately, without reinstalling.
 
 ## Quick Start
 
-**Just double-click `run_patch.bat` (it requests admin rights via UAC)**
+**Simply double-click `run_patch.bat` (automatically requests administrator privileges).**
 
 ```powershell
-# Open "Terminal (Admin)" / "Windows PowerShell (Admin)", then:
-pwsh -File patch_icloud_secd_com.ps1        # interactive menu (recommended)
-pwsh -File patch_icloud_secd_com.ps1 -Cure  # permission fix
-pwsh -File patch_icloud_secd_com.ps1 -Fix   # patch fix
-pwsh -File patch_icloud_secd_com.ps1 -Undo  # undo patch
+# Open "Terminal (Administrator)" or "Windows PowerShell (Administrator)":
+pwsh -File patch_icloud_secd_com.ps1        # Interactive menu (recommended)
+pwsh -File patch_icloud_secd_com.ps1 -Cure  # Permission repair
+pwsh -File patch_icloud_secd_com.ps1 -Fix   # Patch repair
+pwsh -File patch_icloud_secd_com.ps1 -Undo  # Undo patch
 ```
 
-Right-click → "Run with PowerShell" also works (the script is compatible with both PS 5.1 and PS 7). **The script does not self-elevate**: when run without admin rights it only prints a hint — use run_patch.bat or an elevated PowerShell instead.
+You can also right-click and select **Run with PowerShell** (the script is compatible with both PS 5.1 and PS 7). **The script does not auto-elevate**:
+when run without administrator privileges, it only displays a prompt; use `run_patch.bat` or open an administrator shell yourself.
 
-## Usage Guide
+**The UI language follows the system automatically** (Chinese UI on Chinese systems, English otherwise); use `-Lang zh` / `-Lang en` to force one (same via `run_patch.bat zh` / `run_patch.bat en`).
 
-### Running the script
+## How to Use
 
-| Mode | Command |
+### Run Methods
+
+| Method | Command |
 |---|---|
-| Double-click launcher (recommended, auto-elevates + bypasses policy) | `run_patch.bat` |
-| Interactive menu (admin required) | `pwsh -File patch_icloud_secd_com.ps1` |
-| Permission fix (admin required, takes effect immediately) | `pwsh -File patch_icloud_secd_com.ps1 -Cure` |
-| Patch fix (admin required) | `pwsh -File patch_icloud_secd_com.ps1 -Fix` |
-| Undo patch (admin required) | `pwsh -File patch_icloud_secd_com.ps1 -Undo` |
+| Double-click launcher (recommended, auto-elevate + bypass execution policy; uses the built-in Windows PowerShell 5.1) | `run_patch.bat` |
+| Interactive menu (administrator required) | `pwsh -File patch_icloud_secd_com.ps1` |
+| Permission repair (administrator required, takes effect immediately) | `pwsh -File patch_icloud_secd_com.ps1 -Cure` |
+| Patch repair (administrator required) | `pwsh -File patch_icloud_secd_com.ps1 -Fix` |
+| Undo patch (administrator required) | `pwsh -File patch_icloud_secd_com.ps1 -Undo` |
 
-### Interactive menu
+### Interactive Menu
 
-![Interactive menu](images/01-menu.png)
+![Interactive menu](images/01-menu-en.png)
 
-After running, the script detects the current state and shows a menu (dual-mode):
+After launching, the tool automatically checks the current state and displays a dual-mode menu:
 
-- **Current status** — auto-detected fix state:
-  - `✅ Fixed` — Class registration + State=1 all present
-  - `⚠️ Partially fixed` — some items present (commonly missing only State or Class)
-  - `❌ Not fixed` — everything missing (typical state after reinstall)
-  - Also shows WindowsApps permission anomalies and the MSVCP140 (VC++ runtime) version
-- **[1] Permission fix** — restores the WindowsApps ACL — **takes effect immediately, no reinstall/reboot/patch needed** (if it does not work right away, try rebooting the PC)
-- **[2] Patch fix** — writes PackagedCom packaged-COM declarations (no reinstall; popup works immediately)
-- **[3] Undo patch** — deletes the patch entries (State kept)
-- **[4] Show details** — read-only: package / Class / Server / TypeLib / Interface / State / permissions / CRT
+- **Current status** (detected automatically):
+  - `✅ Repaired` — Class registration + State=1 are both present
+  - `⚠️ Partially repaired` — Some entries are present (commonly only State or Class is missing)
+  - `❌ Not repaired` — All entries are missing (typical after a reinstall)
+  - Also shows whether WindowsApps permissions are abnormal and the MSVCP140 (VC++ runtime) version
+- **[1] Permission repair**: restore WindowsApps permissions — **takes effect immediately, with no reinstall, reboot, or patch required** (reboot the PC only if absolutely necessary)
+- **[2] Patch repair**: add the PackagedCom packaged COM declarations (no reinstall required; the popup is restored immediately)
+- **[3] Undo patch**: remove the entries written by the patch (State is retained)
+- **[4] Detailed status**: read-only display of Package/Class/Server/TypeLib/Interface/State/permissions/CRT
+- **[5] Switch language**: switch between Chinese and English instantly (current session only; the next launch still auto-detects from the system language)
 - **[0] Exit**
 
-**Which fix to use**: in most cases (WindowsApps permissions were previously elevated) **[1] Permission fix** alone takes effect **immediately**; only if the permissions are already normal yet the popup still fails — or **[1] Permission fix** did not restore it — try **[2] Patch fix**.
+**Choosing a repair method**: in most cases (WindowsApps permissions were previously elevated), simply use **[1] Permission repair** for an **immediate fix**.
+Only use **[2] Patch repair** if permissions are already normal but the issue persists, or if **[1] Permission repair** does not restore the popup.
 
-When already admin, [1]/[2]/[3] run directly; otherwise the script only prints an elevation hint (use run_patch.bat or an admin window).
+When running as administrator, [1]/[2]/[3] execute directly. Without administrator privileges, the tool only displays instructions for elevation (use `run_patch.bat` or an administrator shell).
 
-### Fix output
+### Repair Output
 
-Success looks like: every step `[OK]` + `✅ Fix complete`.
+A successful repair is indicated by `[OK]` on every step followed by `✅ Repair completed`.
 
-### Verifying the result
+### Verify the Result
 
-After fixing: **fully close Edge and reopen it**, then click the extension icon: the 6-digit verification popup appears → enter the code in the extension's input box → auto-fill succeeds.
+After repairing, **completely close Edge and reopen it**, then click the extension icon: the verification code popup (showing 6 digits) should appear → enter the code into the extension input field → the value is automatically filled in successfully.
 
 ---
 
 ## Root Cause
 
-### 1. iCloud's password daemon is a packaged COM server
+### 1. iCloud's Password Daemon Is a Packaged COM Server
 
-iCloud for Windows is an **MSIX packaged app** (Store package `AppleInc.iCloud`). Its password-management daemon `secd.exe` (at `iCloud\secd.exe`) is a **COM server**:
+iCloud for Windows is an **MSIX packaged application** (Store package `AppleInc.iCloud`). Its password-management daemon
+`secd.exe` (located in `iCloud\secd.exe`) is a **COM server**:
 
 | Identifier | Value |
 |---|---|
 | CLSID | `{CE6AF8E5-3A75-4AF5-BD59-C42E7228B4F4}` ("SecDaemon Class") |
 | Private interface | `{E095A809-7CDD-4B6D-A528-5D4AC9420D91}` (ISecDaemon, method PerformOperation) |
-| TypeLib | `{71529314-E4B7-400B-8FD7-9A5F695AF311}` v1.0 (secdLib) |
+| TypeLib | `{71529314-E4B7-400B-8FD7-9A5F695AF311}` v1.0 (library name secdLib) |
 
-Each time you click the extension, its helper process `iCloudPasswordsExtensionHelper.exe` runs:
+The extension helper process `iCloudPasswordsExtensionHelper.exe` performs the following every time the extension is clicked:
 
-```
+```text
 CoCreateInstance(CLSID, CLSCTX_LOCAL_SERVER, IID_E095A809)
-→ RPCSS resolves the CLSID → SCM launches secd.exe -Embedding → returns ISecDaemon
-→ PerformOperation (PAKE key agreement)
-→ success → 6-digit code generated locally (GeneratePIN) → PINDialog (#32770) shows "xxx xxx"
-→ extension receives {"cmd":2} (ChallengePIN) → shows input box → user enters code → verified → auto-fill
+→ RPCSS resolves the CLSID → SCM starts secd.exe -Embedding → returns the ISecDaemon interface
+→ Calls PerformOperation (PAKE key agreement)
+→ On success → locally generates a 6-digit verification code (GeneratePIN) → shows PINDialog (#32770) displaying "xxx xxx"
+→ Extension receives {"cmd":2} (ChallengePIN) → shows the input field → user enters the code → verifies → autofills
 ```
 
-**If any step fails, the verification popup never appears.**
+**If any step fails, the verification code popup will not appear.**
 
-### 2. The "isolated view" registry of packaged apps
+### 2. The "Isolated View" of the Registry for Packaged Applications
 
-The registry of an MSIX packaged app (and its COM servers) is **virtualized**: packaged processes see a merge of the "real registry" and an "isolated view". Packaged COM class registrations live in the isolated-view namespace `\REGISTRY\COMROOT\CLASSES` (physically stored in the per-app Helium hives under the package's data directory, mounted as `\REGISTRY\WC\SiloXXXcom`; the data is generated at install time and stays mounted) — **invisible to regedit and the normal registry APIs**.
+The registry of MSIX packaged applications (and their COM servers) is **virtualized**: a packaged process sees a merged view of the "real registry + isolated view".
+The registration of packaged COM classes lives in the **isolated-view namespace**
+`\REGISTRY\COMROOT\CLASSES` (physically stored in the per-application Helium hive in the packaged application data directory,
+mounted as `\REGISTRY\WC\SiloXXXcom`; the data is generated during installation and remains mounted) —
+**it is not visible to regedit or normal registry APIs**.
 
-secd's registration ships inside the package-payload `Registry.dat` (generated by Apple at package build time, containing the full `CLSID\{CE6AF8E5}='SecDaemon Class'` + `LocalServer32` + `TypeLib={71529314-...}` registration); the ATL `.rgs` script embedded in secd is a runtime fallback that does not normally run.
+The secd registration is embedded in the package payload's `Registry.dat` (generated when Apple packages the app and containing
+the complete registration for `CLSID\{CE6AF8E5}='SecDaemon Class'` + `LocalServer32` + `TypeLib={71529314-...}`);
+the ATL `.rgs` script embedded in secd is only a runtime fallback and normally does not execute.
 
-### 3. The real root cause: elevated WindowsApps at install time → the packaged-registration mount silently fails
+### 3. The Actual Root Cause: Installation While Elevated Causes Packaged Registration Mounting to Fail Silently
 
-**Uninstall/reinstall itself does not break anything** (VM A/B: reinstall with standard permissions → popup works); **installing while WindowsApps permissions are elevated** breaks it immediately (a first install triggers it too — no reinstall needed).
+**Uninstalling/reinstalling by itself does not cause the failure** (VM A/B test: uninstall/reinstall under standard permissions → popup works normally);
+**installing while WindowsApps permissions are elevated** → immediate failure (the first installation also triggers it; reinstalling is not required).
 
-Mechanism: secd's registration lives in the package's `Registry.dat` (a package-payload registry baseline — identical content in both the healthy and broken states, both containing the full SecDaemon Class + ISecDaemon marshal + TypeLib registration). The real difference is whether the system **mounts that registration as RPCSS-resolvable packaged-COM view** (`\REGISTRY\COMROOT`): the mount step checks WindowsApps ACL integrity first — with elevated permissions the check fails and the mount is **silently skipped** (COMROOT absent → 0xC0000034, not denied) → helper CoCreateInstance 0x80040154 (CLASSNOTREG) → replies {"cmd":10} → popup never appears. **Restoring the standard ACL makes the mount succeed on the next resolution — effective immediately, no reinstall/reboot needed, and the fix persists** (re-elevating or rebooting afterwards does not affect it).
+Failure mechanism: secd's registration is located in the package's `Registry.dat` under **both working and broken states**
+(the file is a **package-payload-embedded** registration baseline, as confirmed by AppxBlockMap; both states are identical and contain the complete SecDaemon Class
++ ISecDaemon marshal + TypeLib registration). The difference is not where the registration is stored, but whether the system mounts the registration
+as a packaged COM view that RPCSS can resolve (`\REGISTRY\COMROOT`): the mount step performs a WindowsApps ACL integrity pre-check;
+the elevated-permission state fails that check → **mounting is silently skipped** (COMROOT does not exist → `0xC0000034`, rather than Access Denied)
+→ the helper's `CoCreateInstance` returns `0x80040154 (CLASSNOTREG)` → it returns `{"cmd":10}` → the popup never appears.
+**After restoring the standard ACL, the next resolution attempt mounts the view successfully → the fix takes effect immediately**
+(no reinstall/reboot required, and the repaired state persists; later ACL changes/reboots do not affect it).
 
-**Comparison evidence**: on a machine installed with standard permissions, RPCSS opens the CLSID from the isolated view (confirmed via ETW); on the broken machine every path fails to resolve. The healthy machine's real registry (HKCR, PackagedCom, HKCU Classes) also lacks this registration — it exists only in the isolated view.
-
-> Note: the `p222-contactsws.icloud.com` DNS decommission only explains slow app startup (~30 s for China-region accounts), not the missing popup; "registration lost after reinstall" is actually a failed mount (see the mechanism section above).
+**Comparison evidence**: on a machine installed with normal permissions, RPCSS can open the CLSID from the isolated view; on the faulty machine,
+all resolution paths fail. The remote real registry (HKCR, PackagedCom, HKCU Classes) also contains no such registration —
+it exists only in the isolated view.
 
 ---
 
 ## How the Fix Works
 
-### Key discovery: PackagedCom is where packaged COM declarations are materialized
+### Key Finding: PackagedCom Is the Materialized Registry Location for Packaged COM Declarations
 
-`<com:Class>` declarations in the MSIX package manifest (`AppxManifest.xml`) are materialized into the real registry at `HKLM\SOFTWARE\Classes\PackagedCom\` (readable by SCM/RPCSS). The iCloud package's other four COM servers (iCloudHome / iCloudDrive / iCloudPhotos / APSDaemon) **all work through manifest declarations + PackagedCom materialization** — **only secd was left out by Apple** (it depends on the isolated-view registration mount, which fails after an elevated-permission install; see the root cause section).
+The `<com:Class>` declarations in the MSIX package manifest (`AppxManifest.xml`) are materialized into the real registry at
+`HKLM\SOFTWARE\Classes\PackagedCom\` (readable by SCM/RPCSS). The four COM servers in the iCloud package,
+iCloudHome / iCloudDrive / iCloudPhotos / APSDaemon, all rely on **manifest declarations + PackagedCom materialization** —
+**only Apple omitted secd** (it relies on the isolated-view registration mount, and that mechanism fails after an elevated-permission installation, as described above).
 
-### What the script does
+### Repair Method
 
-It adds the missing "packaged COM declaration" for secd under `PackagedCom` (simulating a manifest declaration):
+Add the missing **"packaged COM declaration"** for secd under `PackagedCom` (emulating the manifest declaration):
 
-```
+```text
 HKLM\SOFTWARE\Classes\PackagedCom\Package\AppleInc.iCloud_15.9.60.0_x64__nzyj5cx40ttqa\
-├── Class\{CE6AF8E5-3A75-4AF5-BD59-C42E7228B4F4}   ← CLSID declaration (ServerId → Server below)
+├── Class\{CE6AF8E5-3A75-4AF5-BD59-C42E7228B4F4}   ← CLSID declaration (ServerId points to the Server below)
 ├── Server\5                                        ← ExeServer: Executable=iCloud\secd.exe
 ├── Interface\{E095A809-7CDD-4B6D-A528-5D4AC9420D91} ← ISecDaemon (UseUniversalMarshaler)
 ├── TypeLib\{71529314-E4B7-400B-8FD7-9A5F695AF311}\1.0 ← Win32Path=iCloud\secd.exe
-└── ClassIndex / InterfaceIndex / TypeLibIndex entries
+└── ClassIndex / InterfaceIndex / TypeLibIndex indexes
 ```
 
-**Effect** (confirmed via ETW kernel process events): clicking the extension makes RPCSS resolve the CLSID from PackagedCom and launch secd **with its packaged identity**:
+**Effect** (confirmed by ETW kernel process events): after clicking the extension, RPCSS resolves the CLSID from PackagedCom
+and starts secd with the **packaged identity**:
 
-```
+```text
 Process 5064 started by parent 1968 (RPCSS/DcomLaunch)
 ImageName: ...\AppleInc.iCloud_15.9.60.0_x64__nzyj5cx40ttqa\iCloud\secd.exe
-PackageFullName: AppleInc.iCloud_15.9.60.0_x64__nzyj5cx40ttqa   ← packaged identity!
+PackageFullName: AppleInc.iCloud_15.9.60.0_x64__nzyj5cx40ttqa   ← packaged identity activation!
 ```
 
-**Identical to healthy machines** — the helper's CoCreateInstance succeeds → PAKE → GeneratePIN → the verification popup appears.
+**This is completely consistent with the behavior on a normal machine** — the helper's `CoCreateInstance` succeeds → PAKE →
+`GeneratePIN` → verification code popup appears.
 
-### Why marshal registration is needed (HKCU/HKLM TypeLib + Interface)
+### Why Marshal Registration Is Also Required (HKCU/HKLM TypeLib + Interface)
 
-The helper and secd communicate cross-process via COM. Marshaling ISecDaemon relies on the TypeLib (Universal Marshaler): `LoadTypeLib` reads the TLB location from `TypeLib\{71529314}\1.0\0\win32`, and `Interface\{E095A809}` provides the TypeLib reference and proxy information. Instrumentation showed helper/secd **querying these keys repeatedly** on startup; missing them breaks the call. The script writes them to **both HKCU and HKLM** so both the packaged user view and the system view resolve.
+The helper and secd communicate through a cross-process COM call. Marshaling of the ISecDaemon interface depends on the TypeLib
+(Universal Marshaler): `LoadTypeLib` looks up the TLB location from `TypeLib\{71529314}\1.0\0\win32` in the registry,
+while `Interface\{E095A809}` provides the TypeLib reference and proxy information. In testing, the helper/secd repeatedly queried
+these keys during startup (ETW/ProcMon evidence), and missing entries caused the call to fail. The script therefore fills both
+**HKCU + HKLM** so both the packaged process's user view and the system view can resolve them.
 
-### Prerequisite (patch fix only): VC++ runtime (MSVCP140 ≥ 14.4x)
+### Prerequisite (Patch Repair Only): VC++ Runtime (MSVCP140 ≥ 14.4x)
 
-**This condition applies only to the patch fix ([2] / `-Fix`)** — the permission fix ([1] / `-Cure`) does not depend on the VC++ version and can ignore it.
+**This prerequisite only affects patch repair ([2] / `-Fix`)** — permission repair ([1] / `-Cure`) does not depend on the VC++
+version, so this section can be ignored for that method.
 
-VM cross-experiments: when the System32 MSVCP140 (VC++ 2015-2022 Redistributable) is **below 14.40**, the helper crashes while processing the verification-code message (0xC0000005, NULL dereference in `_Mtx_do_lock`, before COM activation) — the patch never gets a chance to take effect. The script detects this and warns to install the latest [VC++ 2015-2022 Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) (on Win11, a Windows Update may be needed since System32's copy is an OS component).
+VM cross-testing: when System32's MSVCP140 (VC++ 2015-2022 runtime)
+is **below 14.40**, the helper crashes while processing the verification-code message (0xC0000005, null-pointer dereference in
+MSVCP140 `_Mtx_do_lock`, before COM activation), so the patch never gets a chance to take effect.
+The script includes a built-in check: when `<14.40`, it warns you to install
+[VC++ 2015-2022 Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe)
+first (on Windows 11 system-component scenarios, Windows Update may be tried first).
 
-### Why CKKS Passwords State = 1
+### Why CKKS Passwords State = 1 Is Required
 
-The iCloud Passwords feature-enable switch. On normally installed machines the app creates the key (State=1); on broken installs the key may be **entirely missing** (VM cross-experiment: working CRT + missing key → no popup, blocked by the helper's state gate; creating the key with State=1 restored it immediately). The script **auto-creates the key when missing** and sets State=1.
+This is the enablement switch for the iCloud "Passwords" feature. On a normally installed machine, the application creates this key (`State=1`);
+on broken/bad installations the key may be completely missing (VM cross-test: normal CRT + no such key → no popup, because the helper's state gate blocks it;
+creating the key and setting it to 1 restores the popup immediately). The script automatically creates the key and sets it to 1 when it is missing.
 
 ---
 
 ## Registry Changes
 
-**The script only adds new keys and changes one value — it never overwrites any existing Apple registration.**
+**The script only performs "add new keys + change one value"; it does not overwrite any existing Apple registration.**
 
 ### Added (11 keys)
 
 | # | Location | Content | Purpose |
 |---|---|---|---|
-| 1 | `HKLM\...\PackagedCom\Package\<pkg>\Class\{CE6AF8E5}` | ServerId / DisplayName / DeploymentVersion | Packaged CLSID declaration (core) |
-| 2 | `...\Server\<N>` (N chosen dynamically) | Executable=`iCloud\secd.exe`, ApplicationId, TrustLevel=1, RuntimeBehavior=1, BnoIsolation=0, etc. | ExeServer definition for secd |
+| 1 | `HKLM\...\PackagedCom\Package\<package>\Class\{CE6AF8E5}` | ServerId / DisplayName / DeploymentVersion | CLSID packaged declaration (core) |
+| 2 | `...\Server\<N>` (dynamically chosen to avoid conflicts) | Executable=`iCloud\secd.exe`, ApplicationId, TrustLevel=1, RuntimeBehavior=1, BnoIsolation=0, etc. | secd ExeServer definition |
 | 3 | `...\Interface\{E095A809}` | UseUniversalMarshaler=1, TypeLibId, TypeLibVersionNumber=1.0 | ISecDaemon interface declaration |
 | 4 | `...\TypeLib\{71529314}\1.0` | Win32Path/Win64Path=`iCloud\secd.exe` | TypeLib declaration |
-| 5–7 | `PackagedCom\ClassIndex/InterfaceIndex/TypeLibIndex\{GUID}\<pkg>` | empty keys | Indexes (used by SCM lookup) |
-| 8 | `HKCU\Software\Classes\TypeLib\{71529314}\1.0` | `0\win32`/`0\win64`=absolute secd.exe path, FLAGS, HELPDIR | TypeLib loading for marshaling |
-| 9 | `HKLM\SOFTWARE\Classes\TypeLib\{71529314}\1.0` | same as above | system-view fallback |
-| 10 | `HKCU\Software\Classes\Interface\{E095A809}` | TypeLib={71529314}, TypeLib\Version=1.0, Version=1.0, ProxyStubClsid32={00020424-...} | interface marshal resolution |
-| 11 | `HKLM\SOFTWARE\Classes\Interface\{E095A809}` | same as above | system-view fallback |
+| 5-7 | `PackagedCom\ClassIndex/InterfaceIndex/TypeLibIndex\{GUID}\<package>` | Empty keys | Indexes (used by SCM lookup) |
+| 8 | `HKCU\Software\Classes\TypeLib\{71529314}\1.0` | `0\win32`/`0\win64`=absolute path to secd.exe, FLAGS, HELPDIR | TypeLib loading for marshaling |
+| 9 | `HKLM\SOFTWARE\Classes\TypeLib\{71529314}\1.0` | Same as above | System-view fallback |
+| 10 | `HKCU\Software\Classes\Interface\{E095A809}` | TypeLib={71529314}, TypeLib\Version=1.0, Version=1.0, ProxyStubClsid32={00020424-...} | Interface marshaling resolution |
+| 11 | `HKLM\SOFTWARE\Classes\Interface\{E095A809}` | Same as above | System-view fallback |
 
-### Modified (1 value)
+### Changed (1 value; key created automatically if missing)
 
 | Location | Change |
 |---|---|
-| `HKCU\...\Internet Services\CKKS\Features\Passwords\State` | set to 1 (key may be missing on broken installs — the script auto-creates it) |
+| `HKCU\...\Internet Services\CKKS\Features\Passwords\State` | Set to 1 (normal installations already have the key and only change its value; broken/reinstalled systems may lack it → the script creates it automatically) |
 
-### What `-Undo` removes
+### What `-Undo` Removes
 
-- All 11 added keys above (indexes and empty parent keys included)
-- **State is left untouched** (set it back to 0 manually if needed)
-- Idempotent: running Undo twice is safe; re-running Fix reuses the existing ServerId (no orphan entries)
-
----
-
-## Script Design
-
-- **PS 5.1 compatible**: `#requires -Version 5.1` + **UTF-8 with BOM** (5.1 reads BOM-less files as ANSI, which garbles Chinese text — a known pitfall).
-- **Dynamic values**: package name (`Get-AppxPackage`), ServerId (max existing + 1, or reuse if already registered), DeploymentVersion (read from existing Class entries), secd.exe path (from `InstallLocation`).
-- **Interactive menu**: live status detection (Class registered / State / marshal keys complete), with Fix / Undo / detailed status / exit; `-Fix` / `-Undo` switches for scripted use.
+- Deletes all 11 keys added above (including empty index parent shells)
+- **State is retained** (set it back to 0 manually if needed)
+- Idempotent: repeating undo is safe; repeating repair reuses the existing ServerId and does not create orphan entries
 
 ---
 
-## Compatibility & Limitations
+## Script Design Details
+
+- **Multi-language**: UI strings follow the system language (`Get-UICulture`); `-Lang zh|en` forces one (same via `run_patch.bat zh|en`). Values written to the registry stay as English constants (they are the read-back basis for the Undo delete-protection)
+- **5.1 compatibility**: `#requires -Version 5.1` + **UTF-8 with BOM** (PowerShell 5.1 reads Chinese scripts without a BOM as ANSI and may parse them incorrectly — this was a real pitfall)
+- **Dynamic values**: package name (`Get-AppxPackage`), ServerId (existing maximum +1, or reuse an already registered one), DeploymentVersion (read from the existing Class value), secd.exe path (`InstallLocation`)
+- **Interactive menu**: real-time status checks (Class registration / State / marshal completeness / WindowsApps permissions / MSVCP140 version), with options for repair / undo / detailed status / exit;
+  command-line modes `-Fix` / `-Cure` / `-Undo` are provided for scripting (exit codes are propagated)
+- **Read-back verification**: at the end of Do-Fix, 10 critical registry entries are compared one by one; write failures (silent by default) are detected and highlighted, preventing a "false success"
+- **Undo protection**: Do-Undo only removes TypeLib/Interface keys written by this tool (after validating the `(default)` value); existing registrations with the same GUID that predated the patch are not deleted by mistake
+- **Multi-package filtering**: `Get-ICloudPackage` filters staged leftover packages (the "deployment amnesia" case) and selects the latest installed version
+
+---
+
+## Compatibility and Limitations
 
 | Item | Tested |
 |---|---|
 | Windows | 11 Pro 10.0.26100 (24H2) |
 | iCloud for Windows | 15.9.60.0 |
-| Edge / Chrome | latest stable |
+| Edge / Chrome | Latest stable versions |
 | PowerShell | 5.1 / 7.x |
 
-- The three GUIDs (CLSID/interface/TypeLib) are stable identifiers within the iCloud product line, but if a **future version changes them**, please report it (the latest values can be extracted from the `.rgs` script embedded in `secd.exe`).
-- After an iCloud **upgrade/reinstall**, `PackagedCom` switches to the new version-numbered directory → **run the script once more**.
-- If it still fails after fixing: first check the script's "read-back verification" (all passed?); then check `CKKS\Features\Passwords\State` (set to 1, restart Edge) and the MSVCP140 version (≥14.40).
+- The three GUIDs (CLSID/interface/TypeLib) are stable identifiers within the iCloud product line, but **future versions may change them and break the fix**. Please report it if that happens (you can extract the latest values from the `.rgs` embedded in `secd.exe`).
+- After an iCloud **upgrade/reinstall**, `PackagedCom` switches to the new version directory → **run the script once again**.
+- If the fix still does not work: first check whether all "read-back verification" checks in the script output passed; then check
+  `CKKS\Features\Passwords\State` (set it to 1 and restart Edge) and the MSVCP140 version (≥14.40).
 
 ---
 
 ## Known Issues
 
-- **After using the patch fix mode, popup text shows resource names** (`Dlg_PinTitle` / `Dlg_PinText` / `Dlg_Dismiss`): when localization via WinRT `ApplicationModel.Resources` fails to load, the UI falls back to showing resource names. The PRI resources are complete (zh-cn/en-US both present) — the runtime load failure has not been pinpointed (Apple side). **The code digits and functionality are unaffected** — purely cosmetic.
+- **After using patch repair mode, the popup text may display resource names** (`Dlg_PinTitle` / `Dlg_PinText` / `Dlg_Dismiss`):
+  localized strings fail to load through WinRT `ApplicationModel.Resources`, so the runtime falls back to displaying the resource names.
+  The PRI resource files are complete (zh-cn/en-US are both present), but the exact reason why runtime loading fails has not been identified
+  (on Apple's side). **The verification code and functionality are unaffected**; this is purely a visual issue.
 
 ---
 
-## Verifying the Fix
+## How to Verify the Fix
 
 ```powershell
 # 1. Registry check (all should be True; State should be 1)
 Test-Path "HKLM:\SOFTWARE\Classes\PackagedCom\Package\$((Get-AppxPackage AppleInc.iCloud).PackageFullName)\Class\{CE6AF8E5-3A75-4AF5-BD59-C42E7228B4F4}"
 (Get-ItemProperty 'HKCU:\Software\Apple Inc.\Internet Services\CKKS\Features\Passwords').State
 
-# 2. Restart Edge → click the extension icon → the verification popup (#32770, 6-digit code) appears
-# 3. Enter the code → auto-fill succeeds
+# 2. Restart Edge → click the extension icon → the verification code popup (#32770, showing 6 digits) appears
+# 3. Enter the verification code → autofill succeeds
 ```
 
-Function chain: extension click → helper `CoCreateInstance` (succeeds; secd launched with packaged identity) → PAKE session → 6-digit code generated → PINDialog popup → input → verify → auto-fill.
+Workflow: click the extension → helper `CoCreateInstance` (succeeds, secd activated with packaged identity) → PAKE session →
+generate 6-digit verification code → PINDialog popup → enter code → verify → autofill.
 
 ---
 
