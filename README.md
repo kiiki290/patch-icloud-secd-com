@@ -252,8 +252,9 @@ iCloud「密码」功能的启用状态开关。正常安装的机器上应用�
 
 ## 脚本设计细节
 
-- **多语言**：界面文字自动跟随系统语言（`Get-UICulture`），`-Lang zh|en` 可强制；
-  `run_patch.bat zh|en` 启动器同参数。注册表写入值保持英文常量（Undo 误删保护的回读依据）
+- **多语言**：界面文字跟随用户首选 UI 语言（`HKCU PreferredUILanguages`，即 Windows
+  显示语言设置），`-Lang zh|en` 可强制；`run_patch.bat zh|en` 启动器同参数。
+  注册表写入值保持英文常量（Undo 误删保护的回读依据）
 - **5.1 兼容**：`#requires -Version 5.1` + **UTF-8 带 BOM**（5.1 按 ANSI 读
   无 BOM 的含中文脚本会解析错乱——踩过的坑）
 - **动态取值**：包名（`Get-AppxPackage`）、ServerId（现有最大 +1，已注册则复用）、

@@ -1,6 +1,6 @@
 # iCloud Passwords Verification Code Popup Fix Tool
 
-> [English](README.en.md) | 简体中文
+> [简体中文](README.md) | English
 
 Fixes the issue where the verification code popup does not appear in the iCloud Passwords browser extension for Windows.
 No Apple files need to be modified. This tool only restores WindowsApps folder permissions or adds the missing registry entries (two repair methods).
@@ -73,7 +73,7 @@ After launching, the tool automatically checks the current state and displays a 
   - `⚠️ Partially repaired` — Some entries are present (commonly only State or Class is missing)
   - `❌ Not repaired` — All entries are missing (typical after a reinstall)
   - Also shows whether WindowsApps permissions are abnormal and the MSVCP140 (VC++ runtime) version
-- **[1] Permission repair**: restore WindowsApps permissions — **takes effect immediately, with no reinstall, reboot, or patch required** (reboot the PC only if absolutely necessary)
+- **[1] Permission repair**: restore WindowsApps permissions — **takes effect immediately, with no reinstall, reboot, or patch required** (if it still does not work, try rebooting the PC)
 - **[2] Patch repair**: add the PackagedCom packaged COM declarations (no reinstall required; the popup is restored immediately)
 - **[3] Undo patch**: remove the entries written by the patch (State is retained)
 - **[4] Detailed status**: read-only display of Package/Class/Server/TypeLib/Interface/State/permissions/CRT
@@ -248,7 +248,7 @@ creating the key and setting it to 1 restores the popup immediately). The script
 
 ## Script Design Details
 
-- **Multi-language**: UI strings follow the system language (`Get-UICulture`); `-Lang zh|en` forces one (same via `run_patch.bat zh|en`). Values written to the registry stay as English constants (they are the read-back basis for the Undo delete-protection)
+- **Multi-language**: UI strings follow the user's preferred UI language (`HKCU PreferredUILanguages` — the Windows display-language setting); `-Lang zh|en` forces one (same via `run_patch.bat zh|en`). Values written to the registry stay as English constants (they are the read-back basis for the Undo delete-protection)
 - **5.1 compatibility**: `#requires -Version 5.1` + **UTF-8 with BOM** (PowerShell 5.1 reads Chinese scripts without a BOM as ANSI and may parse them incorrectly — this was a real pitfall)
 - **Dynamic values**: package name (`Get-AppxPackage`), ServerId (existing maximum +1, or reuse an already registered one), DeploymentVersion (read from the existing Class value), secd.exe path (`InstallLocation`)
 - **Interactive menu**: real-time status checks (Class registration / State / marshal completeness / WindowsApps permissions / MSVCP140 version), with options for repair / undo / detailed status / exit;
