@@ -3,7 +3,8 @@
 > [English](README.en.md) | 简体中文
 
 修复 Windows 版 iCloud Passwords 浏览器扩展"验证码弹窗不出现"的问题。
-无需修改任何 Apple 文件，仅补注册表；支持一键修复 / 撤销 / 状态检测。
+无需修改任何 Apple 文件，本工具仅还原WindowsApps文件夹权限或补注册表（两种修复方式）。
+支持一键修复 / 撤销 / 状态检测。
 
 ## 目录
 
@@ -35,9 +36,10 @@
 
 ## 快速使用
 
+**直接双击 `run_patch.bat`（自动请求管理员权限）**
+
 ```powershell
-# 普通用户：直接双击 run_patch.bat（自动请求管理员权限）
-# 专业用户：右键"终端(管理员)"或"Windows PowerShell(管理员)"打开后：
+# 右键"终端(管理员)"或"Windows PowerShell(管理员)"打开后：
 pwsh -File patch_icloud_secd_com.ps1        # 交互式菜单（推荐）
 pwsh -File patch_icloud_secd_com.ps1 -Cure  # 权限修复
 pwsh -File patch_icloud_secd_com.ps1 -Fix   # 补丁修复
@@ -70,11 +72,14 @@ pwsh -File patch_icloud_secd_com.ps1 -Undo  # 撤销补丁
   - `⚠️ 部分修复` — 部分项存在（常见：只差 State 或 Class）
   - `❌ 未修复` — 全部缺失（重装后的典型状态）
   - 另显示 WindowsApps 权限是否异常、MSVCP140（VC++ 运行库）版本
-- **[1] 权限修复**：还原 WindowsApps 权限——**当场生效，无需重装/重启/补丁**（VM 实测）
+- **[1] 权限修复**：还原 WindowsApps 权限——**当场生效，无需重装/重启/补丁**（实在不行重启下电脑）
 - **[2] 补丁修复**：写入 PackagedCom 打包 COM 声明（不重装，立即恢复弹窗）
 - **[3] 撤销补丁**：删除补丁写入项（State 保留）
 - **[4] 查看详细状态**：只读展示 包/Class/Server/TypeLib/Interface/State/权限/CRT
 - **[0] 退出**
+
+**修复方式选择**：绝大多数情况（WindowsApps 权限曾被提权过）直接用 **[1] 权限修复** 即可**当场生效**；
+仅当权限正常却仍失效、或 **[1] 权限修复** 之后仍未恢复时，再尝试 **[2] 补丁修复**。
 
 已管理员时 [1]/[2]/[3] 直接执行；未管理员仅提示提权方式（用 run_patch.bat 或管理员窗口）。
 
@@ -143,9 +148,6 @@ WindowsApps ACL 完整性，提权状态下校验不过 → **静默跳过挂载
 所有路径均解析失败。远端真实注册表（HKCR、PackagedCom、HKCU Classes）同样
 没有这条注册——它只存在于隔离视图。
 
-> 说明：`p222-contactsws.icloud.com` 的 DNS 退役仅造成中国区账号的应用启动卡顿
-> （约 30 秒），与弹窗无关；「重装后注册丢失」实为注册挂载失效（见上文故障机理）。
-
 ---
 
 ## 修复原理
@@ -192,7 +194,10 @@ TypeLib 引用与代理信息。实测 helper/secd 启动时**反复查询**这�
 证据），缺失会导致调用失败。脚本在 **HKCU + HKLM 两侧**补齐（打包进程的用户视图
 与系统视图都能解析）。
 
-### 前置条件：VC++ 运行库（MSVCP140 ≥ 14.4x）
+### 前置条件（仅补丁修复）：VC++ 运行库（MSVCP140 ≥ 14.4x）
+
+**该条件只影响补丁修复（[2] / `-Fix`）**——权限修复（[1] / `-Cure`）不依赖 VC++
+版本，无需理会此项。
 
 VM 交叉实验：System32 的 MSVCP140（VC++ 2015-2022 运行库）
 **低于 14.40** 时，helper 在处理验证码消息时即崩溃（0xC0000005，MSVCP140
@@ -243,10 +248,6 @@ iCloud「密码」功能的启用状态开关。正常安装的机器上应用�
 
 ## 脚本设计细节
 
-- **提权策略**：脚本**不做自动提权**——普通用户双击
-  `run_patch.bat`（启动器负责 UAC 提权 + `-ExecutionPolicy Bypass`），专业用户
-  自开管理员 PowerShell；非管理员运行脚本仅打印提示并退出，避免 bat 提权后
-  菜单再弹一次 UAC
 - **5.1 兼容**：`#requires -Version 5.1` + **UTF-8 带 BOM**（5.1 按 ANSI 读
   无 BOM 的含中文脚本会解析错乱——踩过的坑）
 - **动态取值**：包名（`Get-AppxPackage`）、ServerId（现有最大 +1，已注册则复用）、
@@ -282,12 +283,10 @@ iCloud「密码」功能的启用状态开关。正常安装的机器上应用�
 
 ## 已知问题
 
-- **弹窗文字显示资源名**（`Dlg_PinTitle` / `Dlg_PinText` / `Dlg_Dismiss`）：
+- **使用补丁修复模式后弹窗文字显示资源名**（`Dlg_PinTitle` / `Dlg_PinText` / `Dlg_Dismiss`）：
   本地化文本经 WinRT `ApplicationModel.Resources` 加载失败时回退显示资源名。
   PRI 资源文件齐全（zh-cn/en-US 均在），运行时加载失败的具体原因未定位
   （Apple 侧）。**验证码数字与功能不受影响**，纯观感问题。
-- **p222 DNS 退役**：`p222-contactsws.icloud.com` NXDOMAIN 导致 iCloud 应用
-  启动时 contacts 拉取卡顿 ~30 秒（中国区账号路由 bug，与弹窗无关）。
 
 ---
 

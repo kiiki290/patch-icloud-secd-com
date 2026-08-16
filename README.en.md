@@ -3,7 +3,7 @@
 > [简体中文](README.md) | English
 
 Fixes the "verification code popup never appears" issue with the iCloud Passwords browser extension on Windows.
-No Apple files are modified — the script only adds registry entries, with one-click **Fix / Undo / Status** modes.
+No Apple files are modified — this tool either restores the WindowsApps folder permissions or patches the registry (two fix modes). One-click **Fix / Undo / Status** modes.
 
 ## Contents
 
@@ -33,9 +33,10 @@ After clicking the iCloud Passwords extension icon in Edge/Chrome:
 
 ## Quick Start
 
+**Just double-click `run_patch.bat` (it requests admin rights via UAC)**
+
 ```powershell
-# Regular users: double-click run_patch.bat (it requests admin rights via UAC)
-# Power users: open "Terminal (Admin)" / "Windows PowerShell (Admin)", then:
+# Open "Terminal (Admin)" / "Windows PowerShell (Admin)", then:
 pwsh -File patch_icloud_secd_com.ps1        # interactive menu (recommended)
 pwsh -File patch_icloud_secd_com.ps1 -Cure  # permission fix
 pwsh -File patch_icloud_secd_com.ps1 -Fix   # patch fix
@@ -67,11 +68,13 @@ After running, the script detects the current state and shows a menu (dual-mode)
   - `⚠️ Partially fixed` — some items present (commonly missing only State or Class)
   - `❌ Not fixed` — everything missing (typical state after reinstall)
   - Also shows WindowsApps permission anomalies and the MSVCP140 (VC++ runtime) version
-- **[1] Permission fix** — restores the WindowsApps ACL — **takes effect immediately, no reinstall/reboot/patch needed** (verified on VM)
+- **[1] Permission fix** — restores the WindowsApps ACL — **takes effect immediately, no reinstall/reboot/patch needed** (if it does not work right away, try rebooting the PC)
 - **[2] Patch fix** — writes PackagedCom packaged-COM declarations (no reinstall; popup works immediately)
 - **[3] Undo patch** — deletes the patch entries (State kept)
 - **[4] Show details** — read-only: package / Class / Server / TypeLib / Interface / State / permissions / CRT
 - **[0] Exit**
+
+**Which fix to use**: in most cases (WindowsApps permissions were previously elevated) **[1] Permission fix** alone takes effect **immediately**; only if the permissions are already normal yet the popup still fails — or **[1] Permission fix** did not restore it — try **[2] Patch fix**.
 
 When already admin, [1]/[2]/[3] run directly; otherwise the script only prints an elevation hint (use run_patch.bat or an admin window).
 
@@ -160,7 +163,9 @@ PackageFullName: AppleInc.iCloud_15.9.60.0_x64__nzyj5cx40ttqa   ← packaged ide
 
 The helper and secd communicate cross-process via COM. Marshaling ISecDaemon relies on the TypeLib (Universal Marshaler): `LoadTypeLib` reads the TLB location from `TypeLib\{71529314}\1.0\0\win32`, and `Interface\{E095A809}` provides the TypeLib reference and proxy information. Instrumentation showed helper/secd **querying these keys repeatedly** on startup; missing them breaks the call. The script writes them to **both HKCU and HKLM** so both the packaged user view and the system view resolve.
 
-### Prerequisite: VC++ runtime (MSVCP140 ≥ 14.4x)
+### Prerequisite (patch fix only): VC++ runtime (MSVCP140 ≥ 14.4x)
+
+**This condition applies only to the patch fix ([2] / `-Fix`)** — the permission fix ([1] / `-Cure`) does not depend on the VC++ version and can ignore it.
 
 VM cross-experiments: when the System32 MSVCP140 (VC++ 2015-2022 Redistributable) is **below 14.40**, the helper crashes while processing the verification-code message (0xC0000005, NULL dereference in `_Mtx_do_lock`, before COM activation) — the patch never gets a chance to take effect. The script detects this and warns to install the latest [VC++ 2015-2022 Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) (on Win11, a Windows Update may be needed since System32's copy is an OS component).
 
@@ -204,7 +209,6 @@ The iCloud Passwords feature-enable switch. On normally installed machines the a
 
 ## Script Design
 
-- **Elevation strategy**: the script **does not self-elevate** — regular users double-click `run_patch.bat` (the launcher handles UAC elevation + `-ExecutionPolicy Bypass`), power users open an admin PowerShell; running the script without admin rights only prints a hint and exits, so the launcher never triggers a second UAC prompt.
 - **PS 5.1 compatible**: `#requires -Version 5.1` + **UTF-8 with BOM** (5.1 reads BOM-less files as ANSI, which garbles Chinese text — a known pitfall).
 - **Dynamic values**: package name (`Get-AppxPackage`), ServerId (max existing + 1, or reuse if already registered), DeploymentVersion (read from existing Class entries), secd.exe path (from `InstallLocation`).
 - **Interactive menu**: live status detection (Class registered / State / marshal keys complete), with Fix / Undo / detailed status / exit; `-Fix` / `-Undo` switches for scripted use.
@@ -228,8 +232,7 @@ The iCloud Passwords feature-enable switch. On normally installed machines the a
 
 ## Known Issues
 
-- **Popup text shows resource names** (`Dlg_PinTitle` / `Dlg_PinText` / `Dlg_Dismiss`): when localization via WinRT `ApplicationModel.Resources` fails to load, the UI falls back to showing resource names. The PRI resources are complete (zh-cn/en-US both present) — the runtime load failure has not been pinpointed (Apple side). **The code digits and functionality are unaffected** — purely cosmetic.
-- **p222 DNS decommission**: `p222-contactsws.icloud.com` returns NXDOMAIN, making the iCloud app stall ~30 s on contacts fetch at startup (China-region account routing bug; unrelated to the popup).
+- **After using the patch fix mode, popup text shows resource names** (`Dlg_PinTitle` / `Dlg_PinText` / `Dlg_Dismiss`): when localization via WinRT `ApplicationModel.Resources` fails to load, the UI falls back to showing resource names. The PRI resources are complete (zh-cn/en-US both present) — the runtime load failure has not been pinpointed (Apple side). **The code digits and functionality are unaffected** — purely cosmetic.
 
 ---
 
