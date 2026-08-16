@@ -117,12 +117,13 @@ CoCreateInstance(CLSID, CLSCTX_LOCAL_SERVER, IID_E095A809)
 
 MSIX 打包应用（及其 COM 服务器）的注册表是**虚拟化**的：打包进程看到的注册表是
 "真实注册表 + 隔离视图"的合并。打包 COM 类的注册位于**隔离视图命名空间**
-`\REGISTRY\COMROOT\CLASSES`（物理存储在 `\REGISTRY\WC\SiloXXXcom` 挂载的
-`Helium\Cache\*_COM15.dat` hive 中）——**regedit 和常规注册表 API 不可见**。
+`\REGISTRY\COMROOT\CLASSES`（物理存储于打包应用数据目录的每应用 Helium hive，
+挂载为 `\REGISTRY\WC\SiloXXXcom`；数据在安装时生成、常驻挂载）——
+**regedit 和常规注册表 API 不可见**。
 
-secd 的注册由 iCloud 运行时流程写入（secd 内置 ATL `.rgs` 脚本：
-`CLSID\{CE6AF8E5}='SecDaemon Class'` + `LocalServer32='%MODULE%'` +
-`TypeLib={71529314-...}`），**仅在首次安装时执行**。
+secd 的注册包含在**包 payload 内置的 `Registry.dat`**（Apple 打包时生成，内含
+`CLSID\{CE6AF8E5}='SecDaemon Class'` + `LocalServer32` + `TypeLib={71529314-...}`
+完整注册）；secd 内嵌的 ATL `.rgs` 脚本是运行时兜底，正常情况下不会执行。
 
 ### 3. 真正的根因：提权状态下安装 → 打包注册挂载机制静默失效
 
@@ -155,7 +156,7 @@ MSIX 包清单（`AppxManifest.xml`）中的 `<com:Class>` 声明会物化到真
 `HKLM\SOFTWARE\Classes\PackagedCom\`（SCM/RPCSS 可读）。iCloud 包的
 iCloudHome / iCloudDrive / iCloudPhotos / APSDaemon 四个 COM 服务器**都靠
 manifest 声明 + PackagedCom 物化工作**——**唯独 Apple 漏掉了 secd**（它依赖
-隔离视图的运行时注册，而该注册重装后丢失）。
+隔离视图的注册挂载，该机制在提权安装后失效，见故障机理）。
 
 ### 修复做法
 
@@ -170,7 +171,7 @@ HKLM\SOFTWARE\Classes\PackagedCom\Package\AppleInc.iCloud_15.9.60.0_x64__nzyj5cx
 └── ClassIndex / InterfaceIndex / TypeLibIndex 索引
 ```
 
-**效果**（ETW 内核进程事件铁证）：点击扩展后，RPCSS 从 PackagedCom 解析 CLSID，
+**效果**（ETW 内核进程事件证实）：点击扩展后，RPCSS 从 PackagedCom 解析 CLSID，
 以**打包身份**启动 secd：
 
 ```
@@ -283,8 +284,8 @@ iCloud「密码」功能的启用状态开关。正常安装的机器上应用�
 
 - **弹窗文字显示资源名**（`Dlg_PinTitle` / `Dlg_PinText` / `Dlg_Dismiss`）：
   本地化文本经 WinRT `ApplicationModel.Resources` 加载失败时回退显示资源名。
-  PRI 资源文件齐全（zh-cn/en-US 均在），是运行时加载失败（疑似重装后 helper
-  进程身份/包上下文问题，Apple 侧）。**验证码数字与功能不受影响**，纯观感问题。
+  PRI 资源文件齐全（zh-cn/en-US 均在），运行时加载失败的具体原因未定位
+  （Apple 侧）。**验证码数字与功能不受影响**，纯观感问题。
 - **p222 DNS 退役**：`p222-contactsws.icloud.com` NXDOMAIN 导致 iCloud 应用
   启动时 contacts 拉取卡顿 ~30 秒（中国区账号路由 bug，与弹窗无关）。
 
