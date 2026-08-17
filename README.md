@@ -3,7 +3,7 @@
 > [English](README.en.md) | 简体中文
 
 修复 Windows 版 iCloud Passwords 浏览器扩展"验证码弹窗不出现"的问题。
-无需修改任何 Apple 文件，本工具仅还原WindowsApps文件夹权限或补注册表（两种修复方式）。
+无需修改任何 Apple 文件，本工具仅还原WindowsApps文件夹权限或添加注册表（两种修复方式）。
 支持一键修复 / 撤销 / 状态检测。
 
 ## 目录

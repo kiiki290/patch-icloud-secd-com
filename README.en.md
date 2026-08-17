@@ -3,7 +3,7 @@
 > [简体中文](README.md) | English
 
 Fixes the issue where the verification code popup does not appear in the iCloud Passwords browser extension for Windows.
-No Apple files need to be modified. This tool only restores WindowsApps folder permissions or adds the missing registry entries (two repair methods).
+No Apple files need to be modified. This tool only restores WindowsApps folder permissions or adds the registry entries (two repair methods).
 Supports one-click repair / undo / status check.
 
 ## Table of Contents
